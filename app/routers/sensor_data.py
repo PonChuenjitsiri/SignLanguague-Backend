@@ -1,14 +1,11 @@
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 
 from app.schemas.sensor_data import (
     GesturePredictRequest,
     RawPredictRequest,
-    PredictBufferResponse,
-    SentenceResponse,
-    BufferWordInfo,
 )
 from app.services.prediction_service import PredictionService
 from app.services.sign_language_service import SignLanguageService
@@ -20,67 +17,86 @@ router = APIRouter(prefix="/api/sensor-data", tags=["Sensor Data & Prediction"])
 
 
 # ======================================================
-# Glove Signal — ESP32 sends status updates via REST API
+# Schemas (inline — specific to this router)
 # ======================================================
 class GloveSignalRequest(BaseModel):
     msg: str = Field(..., description="Signal from ESP32: START_SIGNAL or STOP_SIGNAL")
 
 
-class GloveState:
-    """Tracks the glove's current state."""
-    def __init__(self):
-        self.is_recording = False
-        self.last_signal: Optional[str] = None
-        self.last_signal_time: Optional[datetime] = None
-
-    def update(self, signal: str):
-        self.last_signal = signal
-        self.last_signal_time = datetime.utcnow()
-        if signal == "START_SIGNAL":
-            self.is_recording = True
-        elif signal == "STOP_SIGNAL":
-            self.is_recording = False
-
-    def get_status(self):
-        return {
-            "is_recording": self.is_recording,
-            "last_signal": self.last_signal,
-            "last_signal_time": str(self.last_signal_time) if self.last_signal_time else None,
-        }
+class BufferWordInfo(BaseModel):
+    word: str
+    titleThai: Optional[str] = None
+    titleEng: Optional[str] = None
+    label: Optional[str] = None
+    confidence: float
 
 
-glove_state = GloveState()
+class PredictResponse(BaseModel):
+    """Response from /predict — word predicted and added to buffer."""
+    predicted_sign: str
+    confidence: float
+    titleThai: Optional[str] = None
+    titleEng: Optional[str] = None
+    label: Optional[str] = None
+    recording: bool
+    word_count: int
+    current_words: List[BufferWordInfo]
 
 
+class SentenceResponse(BaseModel):
+    """Response from /sentence."""
+    complete: bool = Field(..., description="True = finalized by STOP_SIGNAL")
+    recording: bool = Field(..., description="True = still recording gestures")
+    sentence: str
+    words: List[BufferWordInfo]
+    word_count: int
+
+
+# ======================================================
+# Signal — ESP32 sends START_SIGNAL / STOP_SIGNAL
+# ======================================================
 @router.post("/signal")
 async def receive_signal(request: GloveSignalRequest):
     """
     Receive signal from ESP32 glove.
 
-    - `{"msg": "START_SIGNAL"}` → Glove started recording gesture
-    - `{"msg": "STOP_SIGNAL"}` → Glove stopped recording, data coming next
+    - `{"msg": "START_SIGNAL"}` → Start recording session (clears previous buffer)
+    - `{"msg": "STOP_SIGNAL"}`  → Stop recording, finalize sentence
 
-    ESP32 calls this to notify the server about glove state.
+    Flow:
+    1. POST /signal → START_SIGNAL
+    2. POST /predict/raw (N times, each gesture)
+    3. POST /signal → STOP_SIGNAL
+    4. GET /sentence → returns completed sentence
     """
-    if request.msg not in ("START_SIGNAL", "STOP_SIGNAL"):
+    if request.msg == "START_SIGNAL":
+        await sentence_buffer.start_recording()
+        return {
+            "message": "Recording started — send gestures via /predict/raw",
+            "recording": True,
+        }
+
+    elif request.msg == "STOP_SIGNAL":
+        result = await sentence_buffer.stop_recording()
+        return {
+            "message": "Recording stopped — sentence finalized",
+            "recording": False,
+            "sentence": result,
+        }
+
+    else:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown signal: {request.msg}. Use START_SIGNAL or STOP_SIGNAL.",
         )
 
-    glove_state.update(request.msg)
-
-    return {
-        "message": f"Signal received: {request.msg}",
-        "glove": glove_state.get_status(),
-    }
-
 
 @router.get("/signal/status")
 async def get_glove_status():
-    """Get the current glove state."""
-    return glove_state.get_status()
-
+    """Get the current recording state."""
+    return {
+        "recording": sentence_buffer.is_recording,
+    }
 
 
 # ======================================================
@@ -135,48 +151,37 @@ async def _predict_and_buffer(frames_2d: list, source: str = "api") -> dict:
     return {
         "predicted_sign": predicted_sign,
         "confidence": ensemble_conf,
-        "buffer_state": buffer_state,
         "sign_entry": sign_entry,
+        "buffer_state": buffer_state,
     }
 
 
 # ======================================================
 # REST API Predict — JSON (structured)
 # ======================================================
-@router.post("/predict", response_model=PredictBufferResponse)
+@router.post("/predict", response_model=PredictResponse)
 async def predict_json(request: GesturePredictRequest):
     """
-    Predict from structured JSON.
-
-    ESP32 sends frames as JSON → predict → buffer word.
+    Predict from structured JSON frames → add word to buffer.
     """
     frames_2d = [frame.to_flat_list() for frame in request.frames]
     result = await _predict_and_buffer(frames_2d, source="api_json")
-
-    return PredictBufferResponse(
-        predicted_sign=result["predicted_sign"],
-        confidence=result["confidence"],
-        buffering=True,
-        word_count=result["buffer_state"]["word_count"],
-        current_words=[BufferWordInfo(**w) for w in result["buffer_state"]["current_words"]],
-        seconds_until_complete=result["buffer_state"]["seconds_until_complete"],
-    )
+    return _build_predict_response(result)
 
 
 # ======================================================
-# REST API Predict — Raw text (same format as serial port)
+# REST API Predict — Raw text (ESP32 format)
 # ======================================================
-@router.post("/predict/raw", response_model=PredictBufferResponse)
+@router.post("/predict/raw", response_model=PredictResponse)
 async def predict_raw(request: RawPredictRequest):
     """
-    Predict from raw ESP32 data (same format as serial port).
+    Predict from raw ESP32 data (S ... E format) → add word to buffer.
 
-    Send the data block with S/E markers:
+    ESP32 sends raw data block:
     ```
-    S 0 0 0 0 0 0 0 0 0 0 0 1404 1431 409 584 3 0.05 0.85 -0.43 -9.64 -0.30 47.91
-    0 0 0 0 0 0 0 0 0 0 0 1375 604 412 592 3 -0.09 0.87 -0.35 -22.21 -8.48 -2.07
-    ...
-    0 0 0 0 0 0 0 0 0 0 0 1770 2112 410 522 4 0.08 0.94 -0.44 -5.12 0.67 -9.94 E
+    S 60 2824 1067 4 2 0.03 0.02 -1.01 ... 2.13
+    60 2824 1067 ...
+    60 2824 1067 ... 0.67 E
     ```
     """
     frames_2d = parse_raw_frames(request.raw_data)
@@ -188,49 +193,48 @@ async def predict_raw(request: RawPredictRequest):
         )
 
     result = await _predict_and_buffer(frames_2d, source="api_raw")
+    return _build_predict_response(result)
 
-    return PredictBufferResponse(
+
+def _build_predict_response(result: dict) -> PredictResponse:
+    """Build a PredictResponse from _predict_and_buffer result."""
+    sign = result.get("sign_entry") or {}
+    buf = result["buffer_state"]
+    return PredictResponse(
         predicted_sign=result["predicted_sign"],
         confidence=result["confidence"],
-        buffering=True,
-        word_count=result["buffer_state"]["word_count"],
-        current_words=[BufferWordInfo(**w) for w in result["buffer_state"]["current_words"]],
-        seconds_until_complete=result["buffer_state"]["seconds_until_complete"],
+        titleThai=sign.get("titleThai"),
+        titleEng=sign.get("titleEng"),
+        label=sign.get("label"),
+        recording=buf["recording"],
+        word_count=buf["word_count"],
+        current_words=[BufferWordInfo(**w) for w in buf["current_words"]],
     )
 
 
-
-
-
-
 # ======================================================
-# Sentence Buffer (shared by all predict methods)
+# Sentence Buffer
 # ======================================================
 @router.get("/sentence", response_model=SentenceResponse)
 async def get_sentence():
     """
     Get accumulated sentence.
 
-    - `complete: true` → finalized (5s idle), display it.
-    - `complete: false` → still buffering.
-    - 204 → empty buffer.
+    - `recording: true, complete: false` → still recording, words so far
+    - `recording: false, complete: true` → finalized by STOP_SIGNAL
+    - 204 → empty / idle
 
     Poll every ~1s to check.
     """
     result = await sentence_buffer.get_sentence()
     if result is None:
-        raise HTTPException(status_code=204, detail="No words in buffer")
+        raise HTTPException(status_code=204, detail="No active session and no sentence")
 
-    return SentenceResponse(
-        complete=result["complete"],
-        sentence=result["sentence"],
-        words=[BufferWordInfo(**w) for w in result["words"]],
-        word_count=result["word_count"],
-    )
+    return SentenceResponse(**result)
 
 
 @router.delete("/sentence")
 async def clear_sentence():
-    """Clear the sentence buffer."""
+    """Clear the sentence buffer and stop recording."""
     await sentence_buffer.clear()
     return {"message": "Sentence buffer cleared"}
