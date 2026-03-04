@@ -22,6 +22,7 @@ class BufferedWord:
     confidence: float
     titleThai: Optional[str] = None
     titleEng: Optional[str] = None
+    label: Optional[str] = None
     timestamp: datetime = None
 
     def __post_init__(self):
