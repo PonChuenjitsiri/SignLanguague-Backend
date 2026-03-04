@@ -9,6 +9,7 @@ class SignLanguageCreate(BaseModel):
 
     titleThai: str = Field(..., json_schema_extra={"example": "สวัสดี"})
     titleEng: str = Field(..., json_schema_extra={"example": "Hello"})
+    label: str = Field(..., json_schema_extra={"example": "hello"})
     category: str = Field(..., json_schema_extra={"example": "Basic"})
     signMethod: str = Field(
         ...,
@@ -25,6 +26,7 @@ class SignLanguageUpdate(BaseModel):
 
     titleThai: Optional[str] = None
     titleEng: Optional[str] = None
+    label: Optional[str] = None
     category: Optional[str] = None
     signMethod: Optional[str] = None
     imageUrl: Optional[str] = None
@@ -36,6 +38,7 @@ class SignLanguageResponse(BaseModel):
     id: PyObjectId = Field(alias="_id")
     titleThai: str
     titleEng: str
+    label: str
     category: str
     signMethod: str
     imageUrl: Optional[str] = ""

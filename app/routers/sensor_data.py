@@ -116,6 +116,7 @@ async def _predict_and_buffer(frames_2d: list, source: str = "api") -> dict:
         confidence=ensemble_conf,
         titleThai=sign_entry.get("titleThai") if sign_entry else None,
         titleEng=sign_entry.get("titleEng") if sign_entry else None,
+        label=sign_entry.get("label") if sign_entry else None,
     )
     buffer_state = await sentence_buffer.add_word(word)
 
