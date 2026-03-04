@@ -19,6 +19,8 @@ dependencies = [
     "pandas>=2.1.0",
     # Serial port (data collection)
     "pyserial>=3.5",
+    # Excel (seed script)
+    "openpyxl>=3.1.0",
 ]
 
 [project.scripts]

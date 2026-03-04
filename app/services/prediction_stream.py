@@ -109,8 +109,8 @@ class PredictionStreamService:
             predicted_sign, ensemble_conf, cnn_conf, xgb_conf = PredictionService.predict(frames_2d)
             print(f"  [PREDICT] {predicted_sign} (Conf: {ensemble_conf:.2f})")
 
-            # Look up Thai title
-            sign_entry = await SignLanguageService.find_by_title_eng(predicted_sign)
+            # Look up by label (handles variants like no_right → no)
+            sign_entry = await SignLanguageService.find_by_label(predicted_sign)
 
             word = BufferedWord(
                 word=predicted_sign,

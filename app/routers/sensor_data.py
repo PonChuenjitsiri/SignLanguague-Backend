@@ -107,8 +107,8 @@ async def _predict_and_buffer(frames_2d: list, source: str = "api") -> dict:
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
-    # Look up Thai title
-    sign_entry = await SignLanguageService.find_by_title_eng(predicted_sign)
+    # Look up by label (handles variants like no_right → no)
+    sign_entry = await SignLanguageService.find_by_label(predicted_sign)
 
     # Buffer the word
     word = BufferedWord(
