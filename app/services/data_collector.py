@@ -3,123 +3,149 @@ import pandas as pd
 import numpy as np
 import os, time
 from datetime import datetime
-from scipy.interpolate import interp1d
-
-import os
+import threading
 from dotenv import load_dotenv
 
 load_dotenv()
 
-SERIAL_PORT = "COM3"
+SERIAL_PORT = os.getenv("SERIAL_PORT", "COM3")
 BAUD_RATE = 115200
 DATA_DIR = "./app/dataset"
 
-def delete_last_file(name, gesture):
-    path = os.path.join(DATA_DIR, gesture)
-    if not os.path.exists(path): return
-    
-    prefix = f"{name}_{gesture}_"
-    files = [os.path.join(path, f) for f in os.listdir(path) if f.startswith(prefix) and f.endswith('.csv')]
-    
-    if not files:
-        print(f" [!] No files to delete for user '{name}' in '{gesture}'")
-        return
+class DataCollectorService:
+    def __init__(self):
+        self.ser = None
+        self.is_running = False
+        self.thread = None
+        self.name = "default"
+        self.gesture = "unknown"
+        self.status_msg = "Idle"
 
-    latest_file = max(files, key=os.path.getctime)
-    try:
-        os.remove(latest_file)
-        print(f"\n [DELETE] Removed: {os.path.basename(latest_file)}")
-        print(f" [STATUS] Current files for {name}: {get_user_seq(name, gesture)}")
-    except Exception as e:
-        print(f" [ERROR] Could not delete file: {e}")
+    def get_user_seq(self, name, gesture):
+        path = os.path.join(DATA_DIR, gesture)
+        if not os.path.exists(path): 
+            return 0
+        prefix = f"{name}_{gesture}_"
+        count = len([f for f in os.listdir(path) if f.startswith(prefix) and f.endswith('.csv')])
+        return count
 
-def get_user_seq(name, gesture):
-    path = os.path.join(DATA_DIR, gesture)
-    if not os.path.exists(path): 
-        return 0
-    
-    prefix = f"{name}_{gesture}_"
-    
-    count = len([f for f in os.listdir(path) if f.startswith(prefix) and f.endswith('.csv')])
-    return count
+    def delete_last_file(self, name, gesture):
+        path = os.path.join(DATA_DIR, gesture)
+        if not os.path.exists(path): return False
+        prefix = f"{name}_{gesture}_"
+        files = [os.path.join(path, f) for f in os.listdir(path) if f.startswith(prefix) and f.endswith('.csv')]
+        if not files:
+            return False
+        latest_file = max(files, key=os.path.getctime)
+        try:
+            os.remove(latest_file)
+            return True
+        except Exception as e:
+            print(f" [ERROR] Could not delete file: {e}")
+            return False
 
-def main():
-    name = input("Enter User Name: ").strip() or "iq"
-    gesture = input("Enter Gesture Label: ").strip() or "hello"
-    
-    try:
-        ser = serial.Serial()
-        ser.port = SERIAL_PORT
-        ser.baudrate = BAUD_RATE
-        ser.timeout = 1
+    def start(self, name: str, gesture: str):
+        if self.is_running:
+            return False, "Collector is already running. Please stop it first."
         
-        # Disable hardware flow control/reset signals
-        ser.setDTR(False)
-        ser.setRTS(False)
+        self.name = name
+        self.gesture = gesture
+        self.is_running = True
+        self.status_msg = f"Starting collection for {name} - {gesture}..."
         
-        # Open the port safely
-        ser.open()
+        self.thread = threading.Thread(target=self._run_loop, daemon=True)
+        self.thread.start()
+        return True, "Started"
+
+    def stop(self):
+        if not self.is_running:
+            return False, "Collector is not running."
         
-        # Clear any leftover junk data in the buffer
-        ser.reset_input_buffer()
-        print(f"\n[READY] Collecting '{gesture}' for {name}")
-        print(f"[STATUS] Current files: {get_user_seq(name, gesture)}")
-        print("--------------------------------------------------")
+        self.is_running = False
+        self.status_msg = "Stopping..."
+        if self.thread:
+            self.thread.join(timeout=2)
+        if self.ser and self.ser.is_open:
+            self.ser.close()
+        self.status_msg = "Stopped"
+        return True, "Stopped"
 
-        raw_buffer = []
-        is_reading_data = False
+    def get_status(self):
+        return {
+            "is_running": self.is_running,
+            "name": self.name,
+            "gesture": self.gesture,
+            "status": self.status_msg,
+            "collected_files": self.get_user_seq(self.name, self.gesture)
+        }
 
-        while True:
-            try:
-                line = ser.readline().decode('utf-8', errors='ignore').strip()
-            except:
-                continue
-                
-            if not line: continue
-
-            if "DELETE_SIGNAL" in line:
-                delete_last_file(name, gesture)
-                print("\nReady for next take...")
-                raw_buffer = []
-                is_reading_data = False
-
-            elif "START_SIGNAL" in line:
-                print(f"[*] Recording...", end="", flush=True)
-                raw_buffer = []
-                is_reading_data = True
+    def _run_loop(self):
+        try:
+            self.ser = serial.Serial()
+            self.ser.port = SERIAL_PORT
+            self.ser.baudrate = BAUD_RATE
+            self.ser.timeout = 1
+            self.ser.setDTR(False)
+            self.ser.setRTS(False)
+            self.ser.open()
+            self.ser.reset_input_buffer()
             
-            elif "CANCEL_SIGNAL" in line:
-                print(" -> [CANCELLED]")
-                is_reading_data = False
-                raw_buffer = []
+            self.status_msg = f"Listening on {SERIAL_PORT} for '{self.gesture}' by '{self.name}'"
+            print(self.status_msg)
+            
+            raw_buffer = []
+            is_reading_data = False
 
-            elif "DISCARD_SIGNAL" in line:
-                print(" -> [DISCARDED: Too Short]")
-                is_reading_data = False
-                raw_buffer = []
-
-            elif is_reading_data and (line.startswith("S ") or (line and line[0].isdigit()) or line.startswith("-")):
-                parts = [x for x in line.split() if x not in ["S", "E"]]
-                
-                if len(parts) == 22:
+            while self.is_running:
+                if self.ser.in_waiting > 0:
                     try:
-                        raw_buffer.append([float(x) for x in parts])
-                    except ValueError:
-                        pass
-
-            elif "SUCCESS_SIGNAL" in line:
-                actual_frames = len(raw_buffer)
-                print(f" [OK] Received {actual_frames} raw frames.")
-                
-                if actual_frames >= 5:
+                        line = self.ser.readline().decode('utf-8', errors='ignore').strip()
+                    except:
+                        continue
+                else:
+                    time.sleep(0.01)
+                    continue
                     
-                    if raw_buffer is not None:
+                if not line: continue
+
+                if "DELETE_SIGNAL" in line:
+                    self.delete_last_file(self.name, self.gesture)
+                    self.status_msg = "Deleted last file. Ready for next take..."
+                    raw_buffer = []
+                    is_reading_data = False
+
+                elif "START_SIGNAL" in line:
+                    self.status_msg = "Recording..."
+                    raw_buffer = []
+                    is_reading_data = True
+                
+                elif "CANCEL_SIGNAL" in line:
+                    self.status_msg = "Cancelled. Ready for next take..."
+                    is_reading_data = False
+                    raw_buffer = []
+
+                elif "DISCARD_SIGNAL" in line:
+                    self.status_msg = "Discarded: Too Short. Ready for next take..."
+                    is_reading_data = False
+                    raw_buffer = []
+
+                elif is_reading_data and (line.startswith("S ") or (line and line[0].isdigit()) or line.startswith("-")):
+                    parts = [x for x in line.split() if x not in ["S", "E"]]
+                    if len(parts) == 22:
+                        try:
+                            raw_buffer.append([float(x) for x in parts])
+                        except ValueError:
+                            pass
+
+                elif "SUCCESS_SIGNAL" in line:
+                    actual_frames = len(raw_buffer)
+                    if actual_frames >= 5:
                         date_str = datetime.now().strftime("%m%d%y")
-                        seq = get_user_seq(name, gesture) + 1
-                        gesture_dir = os.path.join(DATA_DIR, gesture)
+                        seq = self.get_user_seq(self.name, self.gesture) + 1
+                        gesture_dir = os.path.join(DATA_DIR, self.gesture)
                         os.makedirs(gesture_dir, exist_ok=True)
-                        filename = f"{name}_{gesture}_{date_str}_{seq:03d}.csv"
-                        filepath = os.path.join(DATA_DIR, gesture, filename)
+                        filename = f"{self.name}_{self.gesture}_{date_str}_{seq:03d}.csv"
+                        filepath = os.path.join(DATA_DIR, self.gesture, filename)
                         
                         cols = [f'L_F{i}' for i in range(1,6)] + ['L_Ax','L_Ay','L_Az','L_Gx','L_Gy','L_Gz'] + \
                                [f'R_F{i}' for i in range(1,6)] + ['R_Ax','R_Ay','R_Az','R_Gx','R_Gy','R_Gz']
@@ -127,39 +153,21 @@ def main():
                         df = pd.DataFrame(raw_buffer, columns=cols)
                         df.to_csv(filepath, index=False)
 
-                        print("\n" + "="*40)
-                        print(f" [FLEX MAX] Gesture: {gesture}")
-                        print("-" * 40)
-                        
-                        # แยก List ของคอลัมน์ที่ต้องการ
-                        left_flex = [f'L_F{i}' for i in range(1, 6)]
-                        right_flex = [f'R_F{i}' for i in range(1, 6)]
-                        
-                        # หาค่า Max
-                        max_df = df.max()
-                        
-                        # แสดงผลแบบแบ่งฝั่ง ซ้าย | ขวา
-                        print("  LEFT HAND (F1-F5)  |  RIGHT HAND (F1-F5)")
-                        left_vals = ", ".join([f"{max_df[c]:4.0f}" for c in left_flex])
-                        right_vals = ", ".join([f"{max_df[c]:4.0f}" for c in right_flex])
-                        print(f"  {left_vals}  |  {right_vals}")
-                        print("="*40)
-                        
-                        print(f" [TOTAL] {name} - {gesture}: {get_user_seq(name, gesture)} files")
-                        print(filepath)
+                        self.status_msg = f"Saved {filename} ({actual_frames} frames). Ready for next take..."
+                        print(f"[DATA] Saved: {filepath}")
                     else:
-                         print(" [ERROR] Data empty after trimming zeros.")
-                else:
-                    print(" [ERROR] Raw data too short, not saved.")
-                
-                is_reading_data = False
-                print("\nReady for next take...")
+                        self.status_msg = "Error: Raw data too short, not saved."
+                    
+                    is_reading_data = False
+                    raw_buffer = []
 
-    except KeyboardInterrupt:
-        print("\nExit...")
-        if 'ser' in locals() and ser.is_open: ser.close()
-    except Exception as e:
-        print(f"\nError: {e}")
+        except Exception as e:
+            self.status_msg = f"Serial Error: {e}"
+            print(self.status_msg)
+            self.is_running = False
+        finally:
+            if self.ser and self.ser.is_open:
+                self.ser.close()
 
-if __name__ == "__main__":
-    main()
+# Singleton instance
+collector_instance = DataCollectorService()

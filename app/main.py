@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import connect_db, close_db
-from app.routers import sign_language, sensor_data
+from app.routers import sign_language, sensor_data, data_collector
 from app.services.prediction_service import PredictionService
 
 
@@ -37,6 +37,7 @@ app.add_middleware(
 # Register routers
 app.include_router(sign_language.router)
 app.include_router(sensor_data.router)
+app.include_router(data_collector.router)
 
 
 @app.get("/", tags=["Health"])

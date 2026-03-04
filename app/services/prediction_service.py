@@ -96,7 +96,7 @@ class PredictionService:
             PredictionService.labels_map = {int(k): v for k, v in raw_map.items()}
 
         num_classes = len(PredictionService.labels_map)
-        print(f"📋 Labels loaded: {PredictionService.labels_map}")
+        print(f"Labels loaded: {PredictionService.labels_map}")
 
         # Load CNN-LSTM
         if os.path.exists(cnnlstm_path):
@@ -108,17 +108,17 @@ class PredictionService:
                 torch.load(cnnlstm_path, map_location=torch.device("cpu"), weights_only=True)
             )
             PredictionService.cnn_lstm_model.eval()
-            print(f"✅ CNN-LSTM model loaded: {cnnlstm_path}")
+            print(f"CNN-LSTM model loaded: {cnnlstm_path}")
         else:
-            print(f"⚠️  CNN-LSTM model not found: {cnnlstm_path}")
+            print(f"CNN-LSTM model not found: {cnnlstm_path}")
 
         # Load XGBoost
         if os.path.exists(xgb_path):
             PredictionService.xgb_model = xgb.XGBClassifier()
             PredictionService.xgb_model.load_model(xgb_path)
-            print(f"✅ XGBoost model loaded: {xgb_path}")
+            print(f"XGBoost model loaded: {xgb_path}")
         else:
-            print(f"⚠️  XGBoost model not found: {xgb_path}")
+            print(f"XGBoost model not found: {xgb_path}")
 
         PredictionService.is_loaded = (
             PredictionService.cnn_lstm_model is not None
@@ -126,9 +126,9 @@ class PredictionService:
         )
 
         if PredictionService.is_loaded:
-            print(f"🚀 Ensemble prediction service ready!")
+            print(f"Ensemble prediction service ready!")
         else:
-            print(f"⚠️  Prediction service partially loaded — some models missing")
+            print(f"Prediction service partially loaded - some models missing")
 
     @staticmethod
     def predict(frames_2d: list[list[float]]) -> Tuple[str, float, float, float]:

@@ -11,8 +11,31 @@ from app.services.prediction_service import PredictionService
 from app.services.sign_language_service import SignLanguageService
 from app.services.sentence_buffer import sentence_buffer, BufferedWord
 from app.database import get_database
+from app.services.prediction_stream import prediction_stream
 
 router = APIRouter(prefix="/api/sensor-data", tags=["Sensor Data & Prediction"])
+
+
+@router.post("/stream/start")
+async def start_prediction_stream():
+    """Start reading from the serial port for real-time live predictions."""
+    success, msg = prediction_stream.start()
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"message": msg, "status": prediction_stream.get_status()}
+
+@router.post("/stream/stop")
+async def stop_prediction_stream():
+    """Stop the live serial prediction stream."""
+    success, msg = prediction_stream.stop()
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"message": msg, "status": prediction_stream.get_status()}
+
+@router.get("/stream/status")
+async def get_prediction_stream_status():
+    """Get the status of the live prediction stream."""
+    return prediction_stream.get_status()
 
 
 @router.post("/predict", response_model=PredictBufferResponse)
