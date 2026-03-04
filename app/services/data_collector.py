@@ -10,9 +10,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SERIAL_PORT = "COM9"
+SERIAL_PORT = "COM3"
 BAUD_RATE = 115200
-DATA_DIR = "../dataset"
+DATA_DIR = "./app/dataset"
 
 def delete_last_file(name, gesture):
     path = os.path.join(DATA_DIR, gesture)
@@ -146,6 +146,7 @@ def main():
                         print("="*40)
                         
                         print(f" [TOTAL] {name} - {gesture}: {get_user_seq(name, gesture)} files")
+                        print(filepath)
                     else:
                          print(" [ERROR] Data empty after trimming zeros.")
                 else:
