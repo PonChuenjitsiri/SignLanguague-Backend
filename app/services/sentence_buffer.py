@@ -90,10 +90,7 @@ class SentenceBuffer:
         """
         async with self._lock:
             if self.completed_sentence is not None:
-                result = self._completed_result()
-                # Clear after retrieval
-                self.completed_sentence = None
-                return result
+                return self._completed_result()
 
             if self.is_recording:
                 return {
