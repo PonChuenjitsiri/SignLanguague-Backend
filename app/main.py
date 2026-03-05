@@ -3,8 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import connect_db, close_db
-from app.routers import sign_language, sensor_data, data_collector
+from app.routers import sign_language, sensor_data, data_collector, upload
 from app.services.prediction_service import PredictionService
+from app.services.minio_service import MinioService
 
 
 @asynccontextmanager
@@ -13,6 +14,10 @@ async def lifespan(app: FastAPI):
     # Startup
     await connect_db()
     PredictionService.load_model()
+    try:
+        MinioService.ensure_bucket()
+    except Exception as e:
+        print(f"⚠️  MinIO not available: {e}")
     yield
     # Shutdown
     await close_db()
@@ -38,6 +43,7 @@ app.add_middleware(
 app.include_router(sign_language.router)
 app.include_router(sensor_data.router)
 app.include_router(data_collector.router)
+app.include_router(upload.router)
 
 
 @app.get("/", tags=["Health"])
