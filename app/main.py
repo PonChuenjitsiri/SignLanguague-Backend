@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import connect_db, close_db
-from app.routers import sign_language, sensor_data, data_collector, upload
+from app.routers import sign_language, sensor_data, data_collector, upload, glove
 from app.services.prediction_service import PredictionService
 from app.services.minio_service import MinioService
 
@@ -44,6 +44,7 @@ app.include_router(sign_language.router)
 app.include_router(sensor_data.router)
 app.include_router(data_collector.router)
 app.include_router(upload.router)
+app.include_router(glove.router)
 
 
 @app.get("/", tags=["Health"])

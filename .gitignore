@@ -38,3 +38,5 @@ README.md
 
 #dataset
 app/dataset/
+
+*.ino

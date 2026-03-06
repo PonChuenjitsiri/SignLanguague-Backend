@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     EXPECTED_FRAMES: int = 70
     NUM_FEATURES: int = 22
 
+    # Glove heartbeat
+    GLOVE_HEARTBEAT_TIMEOUT: int = 10  # seconds before glove is considered offline
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

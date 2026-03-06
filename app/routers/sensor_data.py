@@ -19,10 +19,6 @@ router = APIRouter(prefix="/api/sensor-data", tags=["Sensor Data & Prediction"])
 # ======================================================
 # Schemas (inline — specific to this router)
 # ======================================================
-class GloveSignalRequest(BaseModel):
-    msg: str = Field(..., description="Signal from ESP32: START_SIGNAL or STOP_SIGNAL")
-
-
 class BufferWordInfo(BaseModel):
     word: str
     titleThai: Optional[str] = None
@@ -41,62 +37,6 @@ class PredictResponse(BaseModel):
     recording: bool
     word_count: int
     current_words: List[BufferWordInfo]
-
-
-class SentenceResponse(BaseModel):
-    """Response from /sentence."""
-    complete: bool = Field(..., description="True = finalized by STOP_SIGNAL")
-    recording: bool = Field(..., description="True = still recording gestures")
-    sentence: str
-    words: List[BufferWordInfo]
-    word_count: int
-
-
-# ======================================================
-# Signal — ESP32 sends START_SIGNAL / STOP_SIGNAL
-# ======================================================
-@router.post("/signal")
-async def receive_signal(request: GloveSignalRequest):
-    """
-    Receive signal from ESP32 glove.
-
-    - `{"msg": "START_SIGNAL"}` → Start recording session (clears previous buffer)
-    - `{"msg": "STOP_SIGNAL"}`  → Stop recording, finalize sentence
-
-    Flow:
-    1. POST /signal → START_SIGNAL
-    2. POST /predict/raw (N times, each gesture)
-    3. POST /signal → STOP_SIGNAL
-    4. GET /sentence → returns completed sentence
-    """
-    if request.msg == "START_SIGNAL":
-        await sentence_buffer.start_recording()
-        return {
-            "message": "Recording started — send gestures via /predict/raw",
-            "recording": True,
-        }
-
-    elif request.msg == "STOP_SIGNAL":
-        result = await sentence_buffer.stop_recording()
-        return {
-            "message": "Recording stopped — sentence finalized",
-            "recording": False,
-            "sentence": result,
-        }
-
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown signal: {request.msg}. Use START_SIGNAL or STOP_SIGNAL.",
-        )
-
-
-@router.get("/signal/status")
-async def get_glove_status():
-    """Get the current recording state."""
-    return {
-        "recording": sentence_buffer.is_recording,
-    }
 
 
 # ======================================================
@@ -210,31 +150,3 @@ def _build_predict_response(result: dict) -> PredictResponse:
         word_count=buf["word_count"],
         current_words=[BufferWordInfo(**w) for w in buf["current_words"]],
     )
-
-
-# ======================================================
-# Sentence Buffer
-# ======================================================
-@router.get("/sentence", response_model=SentenceResponse)
-async def get_sentence():
-    """
-    Get accumulated sentence.
-
-    - `recording: true, complete: false` → still recording, words so far
-    - `recording: false, complete: true` → finalized by STOP_SIGNAL
-    - 204 → empty / idle
-
-    Poll every ~1s to check.
-    """
-    result = await sentence_buffer.get_sentence()
-    if result is None:
-        raise HTTPException(status_code=204, detail="No active session and no sentence")
-
-    return SentenceResponse(**result)
-
-
-@router.delete("/sentence")
-async def clear_sentence():
-    """Clear the sentence buffer and stop recording."""
-    await sentence_buffer.clear()
-    return {"message": "Sentence buffer cleared"}
