@@ -3,7 +3,8 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    MONGODB_URL: str = "mongodb://localhost:27017"
+    MONGODB_URL: str = "mongodb://admin:smartglove2026@localhost:27017/smart_glove?authSource=admin"
+
     DATABASE_NAME: str = "smart_glove"
     MODEL_PATH: str = "models/sign_language_model.pkl"
 
