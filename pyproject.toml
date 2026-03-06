@@ -30,8 +30,8 @@ dependencies = [
 [project.scripts]
 train = "app.services.train_model:train"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "matplotlib>=3.8.0",
     "seaborn>=0.13.0",
 ]

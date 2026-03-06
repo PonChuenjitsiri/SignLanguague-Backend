@@ -30,7 +30,7 @@ if "authSource" not in MONGODB_URL and "@" in MONGODB_URL:
     MONGODB_URL += f"{separator}authSource=admin"
 DATABASE_NAME = os.getenv("DATABASE_NAME", "smart_glove")
 EXCEL_FILE = "CEP_sign_language.xlsx"
-SHEET_NAME = "50 words for data collection"
+SHEET_NAME = "Vocab Category"
 COLLECTION = "sign_languages"
 
 
