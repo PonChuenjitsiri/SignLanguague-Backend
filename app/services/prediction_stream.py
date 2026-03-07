@@ -1,13 +1,3 @@
-"""
-Utility: parse raw ESP32 data into frames for prediction.
-
-Protocol:
-  S v1 v2 ... v22      → First data frame (22 values, S prefix)
-  v1 v2 ... v22        → Middle data frames
-  v1 v2 ... v22 E      → Last data frame (E suffix)
-"""
-
-
 def parse_raw_frames(raw_text: str) -> list[list[float]]:
     """
     Parse raw ESP32 data block into a list of 22-float frames.

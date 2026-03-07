@@ -2,11 +2,6 @@
 Sentence buffer service — accumulates predicted words between
 START_SIGNAL and STOP_SIGNAL from the ESP32 glove.
 
-Flow:
-  1. ESP32 POST /signal → {"msg": "START_SIGNAL"}  →  buffer enters "recording" mode
-  2. ESP32 POST /predict/raw → predict → word gets buffered (repeat N times)
-  3. ESP32 POST /signal → {"msg": "STOP_SIGNAL"}   →  sentence finalized
-  4. Client GET /sentence → returns all accumulated words
 """
 
 import asyncio
