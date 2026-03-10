@@ -10,7 +10,7 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: smartglove2026
-      MONGO_INITDB_DATABASE: smart_glove
+      MONGO_INITDB_DATABASE: smartglove
     volumes:
       - mongodb_data:/data/db
       - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
@@ -42,6 +42,24 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+
+  backend:
+    build: .
+    container_name: smartglove-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      MONGODB_URL: mongodb://admin:smartglove2026@mongodb:27017/smart_glove?authSource=admin
+      DATABASE_NAME: smart_glove
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_BUCKET: smartglove-images
+      MINIO_SECURE: "false"
+    depends_on:
+      - mongodb
+      - minio
 
 volumes:
   mongodb_data:
