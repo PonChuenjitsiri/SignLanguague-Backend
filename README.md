@@ -11,7 +11,7 @@ Recognizes Thai Sign Language gestures from ESP32 sensor data using a CNN-LSTM +
 - **Gesture Lifecycle** — Start/stop gesture recording + sentence buffering
 - **Sign Language Dictionary** — CRUD API for 50 sign language entries (Thai/English)
 - **Data Collection** — Collect training data from ESP32 via serial port
-- **Image Upload** — Upload sign language images to MinIO object storage
+- **Media Upload** — Upload sign language images & gesture demo videos to MinIO object storage
 - **MongoDB + Docker** — Containerized database with Mongo Express UI
 
 ## Quick Start
@@ -90,11 +90,12 @@ uv run uvicorn app.main:app --reload
 | PUT | `/{id}` | แก้ไขข้อมูลท่า |
 | DELETE | `/{id}` | ลบท่า |
 
-### Upload (`/api/upload`)
+### Upload (`/api/sign-languages`)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/image` | อัพโหลดรูปท่าภาษามือไปยัง MinIO |
+| POST | `/uploadpicture` | อัพโหลดรูปท่าภาษามือไปยัง MinIO (`imageUrl`) |
+| POST | `/uploadvideo` | อัพโหลดคลิปสาธิตท่าทางไปยัง MinIO (`videoUrl`) — mp4, mov, avi, webm |
 
 ### Data Collector (`/collector`)
 
@@ -208,7 +209,7 @@ app/
 │   ├── glove.py               # ★ Heartbeat, calibration, gesture, WebSocket
 │   ├── sensor_data.py         # Prediction endpoints (/predict, /predict/raw)
 │   ├── sign_language.py       # CRUD endpoints
-│   ├── upload.py              # Image upload to MinIO
+│   ├── upload.py              # Image & video upload to MinIO
 │   └── data_collector.py      # Data collection endpoints
 ├── services/
 │   ├── prediction_service.py  # CNN-LSTM + XGBoost ensemble inference

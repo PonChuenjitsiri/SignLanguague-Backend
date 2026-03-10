@@ -19,6 +19,10 @@ class SignLanguageCreate(BaseModel):
         default="",
         json_schema_extra={"example": "https://example.com/hello.png"},
     )
+    videoUrl: Optional[str] = Field(
+        default="",
+        json_schema_extra={"example": "https://example.com/hello.mp4"},
+    )
 
 
 class SignLanguageUpdate(BaseModel):
@@ -30,6 +34,7 @@ class SignLanguageUpdate(BaseModel):
     category: Optional[str] = None
     signMethod: Optional[str] = None
     imageUrl: Optional[str] = None
+    videoUrl: Optional[str] = None
 
 
 class SignLanguageResponse(BaseModel):
@@ -42,6 +47,7 @@ class SignLanguageResponse(BaseModel):
     category: str
     signMethod: str
     imageUrl: Optional[str] = ""
+    videoUrl: Optional[str] = ""
     created_at: datetime
     updated_at: datetime
 
