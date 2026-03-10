@@ -78,6 +78,7 @@ async def seed():
             "category": category,
             "signMethod": sign_method,
             "imageUrl": "",
+            "videoUrl": "",
             "created_at": now,
             "updated_at": now,
         })
