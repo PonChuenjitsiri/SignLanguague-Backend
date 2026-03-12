@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+MINIO_PUBLIC_URL = os.getenv("MINIO_PUBLIC_URL", "")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "smartglove-images")
@@ -82,8 +83,14 @@ class MinioService:
         )
 
         # Build public URL
-        protocol = "https" if MINIO_SECURE else "http"
-        url = f"{protocol}://{MINIO_ENDPOINT}/{MINIO_BUCKET}/{object_name}"
+        if MINIO_PUBLIC_URL:
+            # If public URL is provided (e.g. http://100.110.16.105:9000), use it
+            url = f"{MINIO_PUBLIC_URL.rstrip('/')}/{MINIO_BUCKET}/{object_name}"
+        else:
+            # Fallback to endpoint
+            protocol = "https" if MINIO_SECURE else "http"
+            url = f"{protocol}://{MINIO_ENDPOINT}/{MINIO_BUCKET}/{object_name}"
+            
         return url
 
     @classmethod

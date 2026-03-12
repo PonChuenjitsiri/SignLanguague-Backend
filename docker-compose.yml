@@ -53,6 +53,7 @@ services:
       MONGODB_URL: mongodb://admin:smartglove2026@mongodb:27017/smart_glove?authSource=admin
       DATABASE_NAME: smart_glove
       MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_URL: http://100.110.16.105:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin123
       MINIO_BUCKET: smartglove-images
