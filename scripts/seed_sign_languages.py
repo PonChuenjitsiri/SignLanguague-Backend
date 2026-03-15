@@ -88,12 +88,7 @@ async def seed():
     # Check existing data
     existing = await collection.count_documents({})
     if existing > 0:
-        print(f"\n⚠ Collection '{COLLECTION}' already has {existing} documents.")
-        confirm = input("Delete existing and re-seed? (y/N): ").strip().lower()
-        if confirm != "y":
-            print("Aborted.")
-            client.close()
-            return
+        print(f"\n⚠ Collection '{COLLECTION}' already has {existing} documents. Overwriting automatically due to non-interactive mode.")
         await collection.delete_many({})
         print(f"Deleted {existing} existing documents.\n")
 
