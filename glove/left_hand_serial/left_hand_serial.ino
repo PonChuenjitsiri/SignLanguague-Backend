@@ -47,6 +47,7 @@ const uint8_t CMD_STOP = 0xA2;
 const uint8_t CMD_CAL_LEFT = 0xA3;
 const uint8_t CMD_DATA = 0xD1;
 const uint8_t CMD_END = 0xD2;
+const uint8_t CMD_ACK = 0xA4;
 
 // Custom custom signals for Serial flow
 const uint8_t SIG_DELETE = 0xED; // Sent when left btn pressed (IDLE)
@@ -272,9 +273,11 @@ void loop() {
       isRecording = true;
       storage.clear();
       memset(&lastData, 0, sizeof(GloveData));
+      HC12.write(CMD_ACK); // Send ACK
       Serial.println("CMD: START → Recording");
     } else if (cmd == CMD_STOP) {
       isRecording = false;
+      HC12.write(CMD_ACK); // Send ACK
       Serial.println("CMD: STOP → Sending data...");
       sendDataToMaster();
     }

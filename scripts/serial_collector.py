@@ -10,18 +10,18 @@ from datetime import datetime
 # Config
 # ==========================================
 BAUD_RATE = 115200
-DATA_DIR = "data"
+DATA_DIR = "dataset"
 
 def get_latest_file(directory):
     """Find the most recently created file in a directory."""
-    files = glob.glob(os.path.join(directory, "*.json"))
+    files = glob.glob(os.path.join(directory, "*.csv"))
     if not files:
         return None
     return max(files, key=os.path.getctime)
 
 def delete_latest_gesture(name, word):
     """Delete the most recently saved gesture file for the given user and word."""
-    save_dir = os.path.join(DATA_DIR, name, word)
+    save_dir = os.path.join(DATA_DIR, word)
     if not os.path.exists(save_dir):
         print(f"⚠️ Directory {save_dir} does not exist.")
         return False
@@ -39,26 +39,64 @@ def delete_latest_gesture(name, word):
         print("⚠️ No recordings found to delete.")
         return False
 
-def save_gesture(name, word, raw_data_string):
-    """Save the raw 'S ... E' data string into a JSON file."""
-    save_dir = os.path.join(DATA_DIR, name, word)
+def get_next_sequence_number(save_dir, name, word):
+    """Calculate the next sequence suffix (001, 002) for the current user and word."""
+    files = glob.glob(os.path.join(save_dir, f"{name}_{word}_*.csv"))
+    if not files:
+        return 1
+    
+    max_seq = 0
+    for f in files:
+        basename = os.path.basename(f)
+        # Assuming format: name_word_MMDDYY_SEQ.csv
+        parts = basename.replace(".csv", "").split("_")
+        if len(parts) >= 4:
+            try:
+                seq = int(parts[-1])
+                if seq > max_seq:
+                    max_seq = seq
+            except ValueError:
+                pass
+    return max_seq + 1
+
+def save_gesture(name, word, raw_lines):
+    """Save the raw data lines into a CSV file matching the dataset format."""
+    save_dir = os.path.join(DATA_DIR, word)
     os.makedirs(save_dir, exist_ok=True)
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{word}_{timestamp}.json"
+    # Generate filename: {name}_{word}_{MMDDYY}_{SEQ}.csv
+    date_str = datetime.now().strftime("%m%d%y")
+    seq_num = get_next_sequence_number(save_dir, name, word)
+    filename = f"{name}_{word}_{date_str}_{seq_num:03d}.csv"
     filepath = os.path.join(save_dir, filename)
     
-    data = {
-        "word": word,
-        "name": name,
-        "timestamp": timestamp,
-        "raw_data": raw_data_string
-    }
+    headers = "L_F1,L_F2,L_F3,L_F4,L_F5,L_Ax,L_Ay,L_Az,L_Gx,L_Gy,L_Gz,R_F1,R_F2,R_F3,R_F4,R_F5,R_Ax,R_Ay,R_Az,R_Gx,R_Gy,R_Gz"
     
+    valid_frames = 0
     with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write(headers + "\n")
         
-    print(f"✅ SAVED: {filepath}")
+        for line in raw_lines:
+            # Strip formatting markers
+            clean_line = line.strip()
+            if clean_line.startswith("S "):
+                clean_line = clean_line[2:]
+            if clean_line.endswith(" E"):
+                clean_line = clean_line[:-2]
+            clean_line = clean_line.strip()
+            
+            # Split by space and join with comma
+            parts = clean_line.split()
+            if len(parts) == 22:
+                csv_row = ",".join(parts)
+                f.write(csv_row + "\n")
+                valid_frames += 1
+                
+    if valid_frames > 0:
+        print(f"✅ SAVED: {filepath} ({valid_frames} frames)")
+    else:
+        os.remove(filepath)
+        print("❌ FAILED TO SAVE: No valid 22-column frames found.")
 
 def select_serial_port():
     """List available ports and let the user select one."""
@@ -129,10 +167,21 @@ def main():
                     
                 # Print all system/debug messages from ESP32
                 if line.startswith("SYS:"):
-                    print(f"ESP32: {line[4:].strip()}")
-                    if "GESTURE START" in line:
+                    sys_msg = line[4:].strip()
+                    print(f"ESP32: {sys_msg}")
+                    if "GESTURE START" in sys_msg:
                         print(f"▶️ RECORDING STARTED for '{word}'...")
+                    elif "START_DATA" in sys_msg:
+                        # This is the actual trigger that frames are about to be sent over Serial
                         is_recording = True
+                        current_data = []
+                    elif "END_DATA" in sys_msg:
+                        if current_data:
+                            print(f"\n⏹️ RECORDING STOPPED. Received {len(current_data)} frames.")
+                            save_gesture(name, word, current_data)
+                        else:
+                            print("\n⚠️ Recording stopped but no valid frames received.")
+                        is_recording = False
                         current_data = []
                     continue
                     
@@ -146,26 +195,10 @@ def main():
                         is_recording = False
                         current_data = []
                 
-                # Handle data framing directly outputted over serial
-                elif line.startswith("S ") and line.endswith(" E"):
+                # Process data frames (any line containing numbers)
+                elif is_recording and (line[0].isdigit() or line.startswith("S ") or line.startswith("-")):
                     current_data.append(line)
                     print(f"  Received frame {len(current_data)}", end="\r")
-                
-                # Sometime the data comes row by row wrapped between SYS commands (as implemented in ESP)
-                # Let's adjust for the fact that now it prints S ... E lines directly
-                elif is_recording and len(line.split(' ')) >= 22: # Valid raw frame has ~22 parts (+ S and E)
-                    pass # We handled it in the previous elif
-                
-                # Stop Logic (Normally handled by receiving the frames, but ESP outputs SYS: END_DATA)
-                if line == "SYS: END_DATA":
-                    if current_data:
-                        print(f"\n⏹️ RECORDING STOPPED. Received {len(current_data)} frames.")
-                        raw_data_string = "\n".join(current_data)
-                        save_gesture(name, word, raw_data_string)
-                    else:
-                        print("\n⚠️ Recording stopped but no valid frames received.")
-                    is_recording = False
-                    current_data = []
                     
             time.sleep(0.01) # Small sleep to prevent 100% CPU
             

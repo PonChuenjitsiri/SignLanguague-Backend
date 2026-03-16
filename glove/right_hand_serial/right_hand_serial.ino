@@ -49,6 +49,7 @@ const uint8_t CMD_STOP = 0xA2;
 const uint8_t CMD_CAL_LEFT = 0xA3;
 const uint8_t CMD_DATA = 0xD1;
 const uint8_t CMD_END = 0xD2;
+const uint8_t CMD_ACK = 0xA4;
 
 // Custom custom signals for Serial flow
 const uint8_t SIG_DELETE = 0xED;
@@ -66,7 +67,9 @@ GloveData zeroData = {{0, 0, 0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
 // State machine
 enum State {
   IDLE,
+  WAITING_START_ACK,
   RECORDING,
+  WAITING_STOP_ACK,
   RECEIVING_LEFT,
   CALIBRATING_RIGHT,
   CALIBRATING_LEFT
@@ -300,7 +303,18 @@ void loop() {
   if (HC12.available()) {
     uint8_t hdr = HC12.read();
 
-    // Left hand DELETE signal (IDLE mode clear)
+    // ACK Handling for START/STOP Protocol
+    if (hdr == CMD_ACK) {
+      if (currentState == WAITING_START_ACK) {
+        currentState = RECORDING;
+        Serial.println("SYS: >> GESTURE START (ACK received)");
+        blinkLED(1, 100);
+      } else if (currentState == WAITING_STOP_ACK) {
+        currentState = RECEIVING_LEFT;
+        Serial.println("SYS: >> GESTURE STOP (ACK received). Waiting for left hand data...");
+        blinkLED(1, 100);
+      }
+    }
     if (hdr == SIG_DELETE) {
       if (currentState == IDLE) {
         Serial.println("DELETE"); // Tells Python to delete last record
@@ -314,7 +328,7 @@ void loop() {
         bufL.clear();
         bufR.clear();
         blinkLED(3, 100);
-        // Stay in RECORDING so user can just restart the gesture immediately
+        currentState = IDLE; // User needs to press right button again
       }
     }
     // Left hand calibration updates (logging only, no backend)
@@ -378,19 +392,17 @@ void loop() {
     if (isBtnHeld) {
       if (!actionTriggered && (millis() - btnPressStart > 50)) {
         if (currentState == IDLE) {
-          // -> Start Gesture Session
-          currentState = RECORDING;
+          // -> Start Gesture Session -> Wait for Left Hand ACK
+          currentState = WAITING_START_ACK;
           bufL.clear();
           bufR.clear();
           HC12.write(CMD_START); 
-          Serial.println("SYS: >> GESTURE START");
-          blinkLED(1, 100);
+          Serial.println("SYS: >> Sending START... waiting for ACK");
         } else if (currentState == RECORDING) {
-          // -> Stop Gesture Session
-          currentState = RECEIVING_LEFT;
+          // -> Stop Gesture Session -> Wait for Left Hand ACK
+          currentState = WAITING_STOP_ACK;
           HC12.write(CMD_STOP);
-          Serial.println("SYS: >> GESTURE STOP. Waiting for left hand data...");
-          blinkLED(1, 100);
+          Serial.println("SYS: >> Sending STOP... waiting for ACK");
         }
       }
       isBtnHeld = false;
@@ -425,6 +437,19 @@ void loop() {
     if (bufR.size() > 300) {
       currentState = RECEIVING_LEFT;
       HC12.write(CMD_STOP);
+    }
+  }
+  // --- Continuous ACK Pinging if waiting ---
+  static uint32_t lastPing = 0;
+  if (currentState == WAITING_START_ACK) {
+    if (millis() - lastPing > 200) {
+      HC12.write(CMD_START);
+      lastPing = millis();
+    }
+  } else if (currentState == WAITING_STOP_ACK) {
+    if (millis() - lastPing > 200) {
+      HC12.write(CMD_STOP);
+      lastPing = millis();
     }
   }
 }
