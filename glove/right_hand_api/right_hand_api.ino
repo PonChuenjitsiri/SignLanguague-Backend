@@ -3,6 +3,7 @@
 #include <Preferences.h>
 #include <Wire.h>
 #include <vector>
+#include <Adafruit_ADS1X15.h>
 
 // --- WiFi & HTTP ---
 #include <HTTPClient.h>
@@ -16,6 +17,13 @@ HardwareSerial HC12(1);
 const int PIN_LED = 10;
 const int PIN_BTN_R = 5; // Right button (on right hand glove)
 
+// --- Flex Sensor Pins (Right Hand) ---
+// Finger order: [0]=Pinky, [1]=Ring, [2]=Middle(ADS), [3]=Index, [4]=Thumb
+const int FLEX_PIN_R[5] = {0, 1, -1, 3, 4}; // -1 = ADS1115
+const int ADS_CHANNEL_MID = 1; // ADS1115 channel A0 for middle finger
+
+Adafruit_ADS1115 ads;
+
 // =====================================================
 // Config
 // =====================================================
@@ -23,7 +31,7 @@ const char *service_name = "PROV_ESP32_C3";
 const char *pop = "123456";
 
 // ★ เปลี่ยน IP ให้ตรงกับ backend server ในเครือข่ายเดียวกัน
-const String SERVER_URL = "http://192.168.1.100:8000";
+const String SERVER_URL = "http://bai-back.onepointfive.life";
 const String DEVICE_ID = "default";
 
 // Intervals
@@ -50,6 +58,7 @@ struct GloveData {
 };
 
 MPU9250_asukiaaa mpu;
+bool adsReady = false;
 
 // HC12 Commands
 const uint8_t CMD_START = 0xA1;
@@ -295,6 +304,20 @@ String d2s(GloveData d) {
   return String(b);
 }
 
+// Read all 5 flex sensors into raw[5]
+void readFlexSensors(int raw[5]) {
+  for (int i = 0; i < 5; i++) {
+    if (FLEX_PIN_R[i] >= 0) {
+      raw[i] = analogRead(FLEX_PIN_R[i]);
+    } else if (adsReady) {
+      int16_t adsVal = ads.readADC_SingleEnded(ADS_CHANNEL_MID);
+      raw[i] = constrain(map(adsVal, 0, 26400, 0, 4095), 0, 4095);
+    } else {
+      raw[i] = 0;
+    }
+  }
+}
+
 bool checkMovementR(GloveData current) {
   if (bufR.empty())
     return true;
@@ -331,16 +354,16 @@ void calibrateRight() {
     apiCalibrateUpdate("open", round);
     waitForUserAction();
     digitalWrite(PIN_LED, LOW);
-    for (int i = 0; i < 5; i++)
-      sumOpen[i] += analogRead(4 - i);
+    { int rawF[5]; readFlexSensors(rawF);
+      for (int i = 0; i < 5; i++) sumOpen[i] += rawF[i]; }
     Serial.println(" Read Open Done.");
 
     // --- Close hand ---
     Serial.println(" [ACTION] CLOSE hand -> Press Button");
     apiCalibrateUpdate("close", round);
     waitForUserAction();
-    for (int i = 0; i < 5; i++)
-      sumClose[i] += analogRead(4 - i);
+    { int rawF[5]; readFlexSensors(rawF);
+      for (int i = 0; i < 5; i++) sumClose[i] += rawF[i]; }
     Serial.println(" Read Close Done.");
 
     blinkLED(2, 100);
@@ -356,7 +379,7 @@ void calibrateRight() {
       flexMax[i] += 1;
     Serial.printf(" F%d Min: %d | Max: %d\n", i, flexMin[i], flexMax[i]);
   }
-  t_flex = 200;
+  t_flex = 10;
   isCalibrated = true;
   saveCalibrationToFlash();
 
@@ -411,6 +434,15 @@ void setup() {
   mpu.setWire(&Wire);
   mpu.beginAccel();
   mpu.beginGyro();
+
+  // ADS1115 init
+  if (ads.begin(0x48)) {
+    ads.setGain(GAIN_ONE);
+    adsReady = true;
+    Serial.println("ADS1115 ready!");
+  } else {
+    Serial.println("WARNING: ADS1115 not found!");
+  }
 
   Serial.println("\n--- MASTER (RIGHT HAND) READY ---");
   loadCalibrationFromFlash();
@@ -576,14 +608,14 @@ void loop() {
       if (mpu.accelUpdate() == 0 && mpu.gyroUpdate() == 0) {
         GloveData d;
         readMPU(d);
+        int rawF[5]; readFlexSensors(rawF);
         for (int i = 0; i < 5; i++) {
-          int raw = analogRead(4 - i);
           if (isCalibrated) {
-            int clipped = constrain(raw, min(flexMin[i], flexMax[i]),
+            int clipped = constrain(rawF[i], min(flexMin[i], flexMax[i]),
                                     max(flexMin[i], flexMax[i]));
-            d.flex[i] = map(clipped, flexMin[i], flexMax[i], 0, 2000);
+            d.flex[i] = map(clipped, flexMin[i], flexMax[i], 0, 100);
           } else {
-            d.flex[i] = raw;
+            d.flex[i] = rawF[i];
           }
         }
         if (checkMovementR(d)) {
