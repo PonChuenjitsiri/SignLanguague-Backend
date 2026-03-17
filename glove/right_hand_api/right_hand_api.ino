@@ -108,6 +108,7 @@ bool bothBtnActive = false;
 
 // Left button signal from left hand (via HC12)
 bool leftBtnPressed = false;
+unsigned long lastLeftBtnTime = 0;
 
 // Calibration tracking
 int calRound = 0;
