@@ -321,8 +321,19 @@ void loop() {
       btnPressStart = millis();
       actionTriggered = false;
     } else {
+      unsigned long heldTime = millis() - btnPressStart;
+      
+      // Continuous "button held" signal for 2-button stop logic
+      static unsigned long lastHeldSignal = 0;
+      if (heldTime > 500 && heldTime < LONG_PRESS_MS) {
+        if (millis() - lastHeldSignal > 100) {
+          HC12.write(0xEF); // SIG_LEFT_HELD
+          lastHeldSignal = millis();
+        }
+      }
+
       // Long press 3s → calibrate left hand
-      if (millis() - btnPressStart > LONG_PRESS_MS && !actionTriggered) {
+      if (heldTime > LONG_PRESS_MS && !actionTriggered) {
         if (!isRecording) {
           actionTriggered = true;
           calibrateLeft();

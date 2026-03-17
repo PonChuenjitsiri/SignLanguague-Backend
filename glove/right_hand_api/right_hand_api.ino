@@ -66,7 +66,10 @@ const uint8_t CMD_STOP = 0xA2;
 const uint8_t CMD_CAL_LEFT = 0xA3; // ใหม่: สั่งซ้าย calibrate
 const uint8_t CMD_DATA = 0xD1;
 const uint8_t CMD_END = 0xD2;
+// Custom signals for Serial flow
+const uint8_t SIG_DELETE = 0xED;
 const uint8_t SIG_CANCEL = 0xEE; // left btn short press → clear
+const uint8_t SIG_LEFT_HELD = 0xEF; // Sent continuously while left button is held
 
 // HC12 Calibration updates from left hand
 const uint8_t CAL_OPEN = 0xC1;
@@ -483,6 +486,11 @@ void loop() {
         // Stay in RECORDING — user can redo gesture
       }
     }
+    // Left hand continuous held signal
+    else if (hdr == SIG_LEFT_HELD) {
+      leftBtnPressed = true;
+      lastLeftBtnTime = millis();
+    }
     // Left hand calibration updates
     else if (hdr == CMD_CAL_LEFT) {
       // Next byte = calibration sub-command, then round
@@ -568,12 +576,17 @@ void loop() {
 
   // =========================================
   // Check both-button hold (2s → gesture stop)
-  // Left hand sends a special signal when both buttons held
-  // For simplicity: left button held will send continuous SIG_CANCEL
+  // Left hand sends a continuous SIG_LEFT_HELD when both buttons held
   // If right button is also held → both buttons → gesture stop
   // =========================================
+  
+  // Timeout for leftBtnPressed
+  if (leftBtnPressed && millis() - lastLeftBtnTime > 300) {
+    leftBtnPressed = false;
+  }
+  
   // Both buttons held detection:
-  // Right button is held AND we receive SIG_CANCEL from left while held
+  // Right button is held AND left hand has recently sent SIG_LEFT_HELD
   if (isBtnHeld && leftBtnPressed && currentState == RECORDING) {
     if (!bothBtnActive) {
       bothBtnActive = true;
@@ -595,7 +608,6 @@ void loop() {
     }
   } else {
     bothBtnActive = false;
-    leftBtnPressed = false;
   }
 
   // =========================================
