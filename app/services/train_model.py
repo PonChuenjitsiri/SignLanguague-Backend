@@ -18,7 +18,7 @@ import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 from scipy.interpolate import interp1d
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_score, recall_score, f1_score
 import xgboost as xgb
 
 from app.config import get_settings
@@ -244,6 +244,24 @@ def train():
     print(f"[DONE] XGBoost saved -> {XGB_MODEL_PATH}")
 
     # --------------------------------------------------
+    # Model Complexity / Parameters
+    # --------------------------------------------------
+    print(f"\n{'='*50}")
+    print(f"Model Complexity / Parameters")
+    print(f"{'='*50}")
+
+    # CNN-LSTM parameters
+    cnn_lstm_params = sum(p.numel() for p in cnn_lstm_model.parameters() if p.requires_grad)
+    print(f"  CNN-LSTM Trainable Parameters: {cnn_lstm_params:,}")
+
+    # XGBoost approximate parameters (total nodes)
+    try:
+        xgb_nodes = len(xgb_model.get_booster().trees_to_dataframe())
+        print(f"  XGBoost Total Nodes (Approx Params): {xgb_nodes:,}")
+    except Exception as e:
+        print(f"  XGBoost Total Nodes: N/A")
+
+    # --------------------------------------------------
     # Ensemble Evaluation (Soft Voting)
     # --------------------------------------------------
     print(f"\n{'='*50}")
@@ -269,12 +287,28 @@ def train():
     preds_xgboost = np.argmax(probs_xgboost, axis=1)
     preds_ensemble = np.argmax(ensemble_probs, axis=1)
 
+    # Calculate Metrics for Ensemble
+    acc = accuracy_score(y_test, preds_ensemble)
+    precision = precision_score(y_test, preds_ensemble, average='weighted', zero_division=0)
+    recall = recall_score(y_test, preds_ensemble, average='weighted', zero_division=0)
+    f1 = f1_score(y_test, preds_ensemble, average='weighted', zero_division=0)
+    cm = confusion_matrix(y_test, preds_ensemble)
+
     print(f"\n  CNN-LSTM Accuracy:        {accuracy_score(y_test, preds_cnn_lstm)*100:.2f}%")
     print(f"  XGBoost Accuracy:         {accuracy_score(y_test, preds_xgboost)*100:.2f}%")
-    print(f"  Ensemble (Soft Voting):   {accuracy_score(y_test, preds_ensemble)*100:.2f}%")
+    print(f"  Ensemble Accuracy:        {acc*100:.2f}%")
 
-    print(f"\n--- Ensemble Classification Report ---")
-    print(classification_report(y_test, preds_ensemble, target_names=list(labels_map.values())))
+    print(f"\n--- Ensemble Evaluation Metrics ---")
+    print(f"Accuracy:                {acc*100:.2f}%")
+    print(f"Precision:               {precision*100:.2f}%")
+    print(f"Recall (Sensitivity):    {recall*100:.2f}%")
+    print(f"F1-Score:                {f1*100:.2f}%")
+
+    print(f"\n--- Confusion Matrix ---")
+    print(cm)
+
+    print(f"\n--- Detailed Classification Report ---")
+    print(classification_report(y_test, preds_ensemble, target_names=list(labels_map.values()), zero_division=0))
 
     print(f"\n✅ Training complete! Models saved to {OUTPUT_DIR}/")
 

@@ -14,7 +14,10 @@ HardwareSerial HC12(1);
 #define HC12_RX 20
 #define HC12_TX 21
 
-const int PIN_LED = 10;
+const int PIN_LED_R = 8;
+const int PIN_LED_G = 9;
+const int PIN_LED_B = 10;
+bool curr_r = LOW, curr_g = LOW, curr_b = LOW;
 const int PIN_BTN_R = 5; // Right button (on right hand glove)
 
 // --- Flex Sensor Pins (Right Hand) ---
@@ -206,7 +209,7 @@ void sendPredictRaw() {
   int maxFrames = max((int)bufL.size(), (int)bufR.size());
   if (maxFrames < 5) {
     Serial.println("DISCARD: too few frames");
-    blinkLED(2, 50);
+    blinkRGB(2, 50, HIGH, LOW, LOW);
     return;
   }
 
@@ -267,13 +270,38 @@ void loadCalibrationFromFlash() {
 // =====================================================
 // Utilities
 // =====================================================
-void blinkLED(int times, int duration) {
+void setLEDColor(bool r, bool g, bool b) {
+  curr_r = r; curr_g = g; curr_b = b;
+  digitalWrite(PIN_LED_R, r ? HIGH : LOW);
+  digitalWrite(PIN_LED_G, g ? HIGH : LOW);
+  digitalWrite(PIN_LED_B, b ? HIGH : LOW);
+}
+
+void blinkRGB(int times, int duration, bool r, bool g, bool b) {
   for (int i = 0; i < times; i++) {
-    digitalWrite(PIN_LED, HIGH);
+    digitalWrite(PIN_LED_R, r ? HIGH : LOW);
+    digitalWrite(PIN_LED_G, g ? HIGH : LOW);
+    digitalWrite(PIN_LED_B, b ? HIGH : LOW);
     delay(duration);
-    digitalWrite(PIN_LED, LOW);
-    if (i < times - 1)
-      delay(duration);
+    digitalWrite(PIN_LED_R, LOW);
+    digitalWrite(PIN_LED_G, LOW);
+    digitalWrite(PIN_LED_B, LOW);
+    if (i < times - 1) delay(duration);
+  }
+  setLEDColor(curr_r, curr_g, curr_b);
+}
+
+void updateStateLED() {
+  if (!is_connected) {
+    setLEDColor(LOW, LOW, HIGH); // Blue
+    return;
+  }
+  switch(currentState) {
+    case IDLE: setLEDColor(LOW, HIGH, LOW); break; // Green
+    case RECORDING: setLEDColor(HIGH, LOW, LOW); break; // Red
+    case RECEIVING_LEFT: setLEDColor(HIGH, HIGH, LOW); break; // Yellow
+    case CALIBRATING_RIGHT:
+    case CALIBRATING_LEFT: setLEDColor(HIGH, LOW, HIGH); break; // Magenta
   }
 }
 
@@ -289,14 +317,26 @@ void readMPU(GloveData &d) {
 }
 
 void waitForUserAction() {
-  while (digitalRead(PIN_BTN_R) == HIGH)
+  while (digitalRead(PIN_BTN_R) == HIGH) {
+    if (is_connected && millis() - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+      lastHeartbeat = millis(); sendHeartbeat();
+    }
     delay(10);
+  }
   delay(100);
-  while (digitalRead(PIN_BTN_R) == LOW)
+  while (digitalRead(PIN_BTN_R) == LOW) {
+    if (is_connected && millis() - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+      lastHeartbeat = millis(); sendHeartbeat();
+    }
     delay(10);
+  }
   delay(100);
-  while (digitalRead(PIN_BTN_R) == HIGH)
+  while (digitalRead(PIN_BTN_R) == HIGH) {
+    if (is_connected && millis() - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+      lastHeartbeat = millis(); sendHeartbeat();
+    }
     delay(10);
+  }
   delay(100);
 }
 
@@ -345,8 +385,8 @@ void calibrateRight() {
   Serial.println("\n=== CALIBRATION MODE (RIGHT HAND) ===");
   currentState = CALIBRATING_RIGHT;
   apiCalibrateStart("right");
-  blinkLED(5, 100);
-  digitalWrite(PIN_LED, HIGH);
+  blinkRGB(5, 100, HIGH, LOW, HIGH);
+  setLEDColor(HIGH, LOW, HIGH);
 
   long sumOpen[5] = {0, 0, 0, 0, 0};
   long sumClose[5] = {0, 0, 0, 0, 0};
@@ -358,7 +398,7 @@ void calibrateRight() {
     Serial.println(" [ACTION] OPEN hand -> Press Button");
     apiCalibrateUpdate("open", round);
     waitForUserAction();
-    digitalWrite(PIN_LED, LOW);
+    setLEDColor(LOW, LOW, LOW);
     { int rawF[5]; readFlexSensors(rawF);
       for (int i = 0; i < 5; i++) sumOpen[i] += rawF[i]; }
     Serial.println(" Read Open Done.");
@@ -371,9 +411,9 @@ void calibrateRight() {
       for (int i = 0; i < 5; i++) sumClose[i] += rawF[i]; }
     Serial.println(" Read Close Done.");
 
-    blinkLED(2, 100);
+    blinkRGB(2, 100, HIGH, LOW, HIGH);
     if (round < 5)
-      digitalWrite(PIN_LED, HIGH);
+      setLEDColor(HIGH, LOW, HIGH);
   }
 
   // Calculate results
@@ -390,7 +430,7 @@ void calibrateRight() {
 
   apiCalibrateUpdate("done", 5);
   Serial.println(">> RIGHT HAND CALIBRATION DONE!");
-  blinkLED(3, 200);
+  blinkRGB(3, 200, LOW, HIGH, LOW);
 
   currentState = IDLE;
   while (digitalRead(PIN_BTN_R) == HIGH)
@@ -434,7 +474,9 @@ void setup() {
   analogReadResolution(12);
 
   pinMode(PIN_BTN_R, INPUT);
-  pinMode(PIN_LED, OUTPUT);
+  pinMode(PIN_LED_R, OUTPUT);
+  pinMode(PIN_LED_G, OUTPUT);
+  pinMode(PIN_LED_B, OUTPUT);
   Wire.begin(6, 7);
   mpu.setWire(&Wire);
   mpu.beginAccel();
@@ -463,6 +505,7 @@ void loop() {
     Serial.println("WiFi connected! Glove running...");
     was_connected = true;
   }
+  updateStateLED();
 
   // =========================================
   // Heartbeat every 5 seconds
@@ -484,7 +527,7 @@ void loop() {
         Serial.println("[LEFT BTN] Clear data → restart recording");
         bufL.clear();
         bufR.clear();
-        blinkLED(2, 100);
+        blinkRGB(2, 100, HIGH, LOW, LOW);
         // Stay in RECORDING — user can redo gesture
       }
     }
@@ -563,13 +606,13 @@ void loop() {
           HC12.write(CMD_START); // Tell left hand to start recording
           apiGestureStart();
           Serial.println(">> GESTURE START");
-          blinkLED(1, 100);
+          blinkRGB(1, 100, HIGH, LOW, LOW);
         } else if (currentState == RECORDING) {
           // → Stop recording right + request left data → send to backend
           currentState = RECEIVING_LEFT;
           HC12.write(CMD_STOP); // Tell left hand to send data
           Serial.println(">> Waiting for left hand data...");
-          blinkLED(1, 100);
+          blinkRGB(1, 100, HIGH, HIGH, LOW);
         }
       }
       isBtnHeld = false;
@@ -601,7 +644,7 @@ void loop() {
       bufL.clear();
       bufR.clear();
       HC12.write(CMD_STOP);
-      blinkLED(5, 100);
+      blinkRGB(5, 100, LOW, LOW, HIGH);
       bothBtnActive = false;
       leftBtnPressed = false;
       isBtnHeld = false;

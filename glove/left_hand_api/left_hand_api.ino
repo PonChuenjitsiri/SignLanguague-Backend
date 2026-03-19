@@ -9,7 +9,10 @@ HardwareSerial HC12(1);
 #define HC12_RX 20
 #define HC12_TX 21
 #define PIN_BUTTON 5
-#define PIN_LED 10
+#define PIN_LED_R 8
+#define PIN_LED_G 9
+#define PIN_LED_B 10
+bool curr_r = LOW, curr_g = LOW, curr_b = LOW;
 
 // --- Flex Sensor Pins (Left Hand) — reversed from right ---
 // Finger order: [0]=Thumb, [1]=Index, [2]=Middle(ADS), [3]=Ring, [4]=Pinky
@@ -89,14 +92,32 @@ void loadCalibrationFromFlash() {
 // =====================================================
 // Utilities
 // =====================================================
-void blinkLED(int times, int duration) {
-  pinMode(PIN_LED, OUTPUT);
+void setLEDColor(bool r, bool g, bool b) {
+  curr_r = r; curr_g = g; curr_b = b;
+  digitalWrite(PIN_LED_R, r ? HIGH : LOW);
+  digitalWrite(PIN_LED_G, g ? HIGH : LOW);
+  digitalWrite(PIN_LED_B, b ? HIGH : LOW);
+}
+
+void blinkRGB(int times, int duration, bool r, bool g, bool b) {
   for (int i = 0; i < times; i++) {
-    digitalWrite(PIN_LED, HIGH);
+    digitalWrite(PIN_LED_R, r ? HIGH : LOW);
+    digitalWrite(PIN_LED_G, g ? HIGH : LOW);
+    digitalWrite(PIN_LED_B, b ? HIGH : LOW);
     delay(duration);
-    digitalWrite(PIN_LED, LOW);
-    if (i < times - 1)
-      delay(duration);
+    digitalWrite(PIN_LED_R, LOW);
+    digitalWrite(PIN_LED_G, LOW);
+    digitalWrite(PIN_LED_B, LOW);
+    if (i < times - 1) delay(duration);
+  }
+  setLEDColor(curr_r, curr_g, curr_b);
+}
+
+void updateStateLED() {
+  if (isRecording) {
+    setLEDColor(HIGH, LOW, LOW); // Red: Recording / gesture mode
+  } else {
+    setLEDColor(LOW, HIGH, LOW); // Green: IDLE
   }
 }
 
@@ -169,7 +190,7 @@ void sendCalUpdate(uint8_t calCmd, uint8_t round) {
 // =====================================================
 void calibrateLeft() {
   Serial.println("\n=== CALIBRATION MODE (LEFT HAND) ===");
-  blinkLED(5, 100);
+  blinkRGB(5, 100, HIGH, LOW, HIGH);
 
   long sumOpen[5] = {0, 0, 0, 0, 0};
   long sumClose[5] = {0, 0, 0, 0, 0};
@@ -191,7 +212,7 @@ void calibrateLeft() {
     { int rawF[5]; readFlexSensors(rawF);
       for (int i = 0; i < 5; i++) sumClose[i] += rawF[i]; }
 
-    blinkLED(2, 100);
+    blinkRGB(2, 100, HIGH, LOW, HIGH);
   }
 
   // Calculate results
@@ -211,7 +232,7 @@ void calibrateLeft() {
   sendCalUpdate(CAL_DONE, 5);
   Serial.println(">> LEFT HAND CALIBRATION DONE!");
 
-  blinkLED(3, 200);
+  blinkRGB(3, 200, LOW, HIGH, LOW);
   while (digitalRead(PIN_BUTTON) == HIGH)
     delay(10);
   isBtnHeld = false;
@@ -242,7 +263,9 @@ void setup() {
   analogReadResolution(12);
 
   pinMode(PIN_BUTTON, INPUT);
-  pinMode(PIN_LED, OUTPUT);
+  pinMode(PIN_LED_R, OUTPUT);
+  pinMode(PIN_LED_G, OUTPUT);
+  pinMode(PIN_LED_B, OUTPUT);
   Wire.begin(6, 7);
   mpu.setWire(&Wire);
   mpu.beginAccel();
@@ -281,6 +304,8 @@ void loop() {
       sendDataToMaster();
     }
   }
+
+  updateStateLED();
 
   // =========================================
   // Sensor recording (50Hz)

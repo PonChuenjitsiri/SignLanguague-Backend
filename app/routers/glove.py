@@ -15,6 +15,7 @@ router = APIRouter(prefix="/api/glove", tags=["Glove Status"])
 # ======================================================
 _heartbeats: Dict[str, datetime] = {}
 _gesture_state: Dict[str, bool] = {}  # { device_id: gesture_active }
+_calibrated_hands: Dict[str, Dict[str, bool]] = {}  # { device_id: {"left": False, "right": False} }
 
 
 class CalibrationStep(str, Enum):
@@ -207,6 +208,11 @@ async def calibrate_update(request: CalibrateUpdateRequest):
         state["calibrating"] = False
         state["step"] = "done"
         state["updated_at"] = now
+        
+        if request.device_id not in _calibrated_hands:
+            _calibrated_hands[request.device_id] = {"left": False, "right": False}
+        hand = state.get("hand", "right")
+        _calibrated_hands[request.device_id][hand] = True
     else:
         state["round"] = request.round
         state["step"] = request.step.value
@@ -357,6 +363,16 @@ async def ws_unified(websocket: WebSocket, device_id: str = "default"):
                 elapsed = (datetime.now(timezone.utc) - last_hb).total_seconds()
                 online = elapsed <= timeout
 
+                # Clear device data if offline for more than 3 hours (10800 seconds)
+                if elapsed > 10800:
+                    _heartbeats.pop(device_id, None)
+                    _gesture_state.pop(device_id, None)
+                    _calibration_state.pop(device_id, None)
+                    _calibrated_hands.pop(device_id, None)
+                    await sentence_buffer.clear()
+                    online = False
+                    last_hb = None
+
             # --- State ---
             cal_state = _calibration_state.get(device_id)
             calibrating = cal_state["calibrating"] if cal_state else False
@@ -379,6 +395,9 @@ async def ws_unified(websocket: WebSocket, device_id: str = "default"):
             # --- Sentence ---
             ws_sentence = await sentence_buffer.get_ws_sentence()
 
+            # --- Calibration flags ---
+            cal_hands = _calibrated_hands.get(device_id, {"left": False, "right": False})
+
             await websocket.send_json({
                 "status": "online" if online else "offline",
                 "state": state,
@@ -389,6 +408,8 @@ async def ws_unified(websocket: WebSocket, device_id: str = "default"):
                 "recording": ws_sentence["recording"],
                 "complete": ws_sentence["complete"],
                 "word_count": ws_sentence["word_count"],
+                "calibrate_left": cal_hands.get("left", False),
+                "calibrate_right": cal_hands.get("right", False),
             })
     except WebSocketDisconnect:
         pass
