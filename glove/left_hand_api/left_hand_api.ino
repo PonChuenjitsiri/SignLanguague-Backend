@@ -313,7 +313,20 @@ void loop() {
   // =========================================
   // Left button handling
   // =========================================
-  int btnState = digitalRead(PIN_BUTTON);
+  static uint32_t lastDebounceTime = 0;
+  static int lastReading = LOW;
+  static int btnState = LOW;
+  
+  int reading = digitalRead(PIN_BUTTON);
+  if (reading != lastReading) {
+    lastDebounceTime = millis();
+  }
+  if ((millis() - lastDebounceTime) > 50) {
+    if (reading != btnState) {
+      btnState = reading;
+    }
+  }
+  lastReading = reading;
 
   if (btnState == HIGH) {
     if (!isBtnHeld) {
