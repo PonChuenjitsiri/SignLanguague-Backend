@@ -1,29 +1,55 @@
-# Use an official Python runtime as a parent image
-FROM python:3.11-slim
+# syntax=docker/dockerfile:1
 
-# Set working directory
+# Stage 1: Build the environment with uv
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
+
 WORKDIR /app
 
-# Install system dependencies (required for XGBoost and other ML libraries)
-RUN apt-get update && apt-get install -y \
+# Install only the absolute minimum required to compile wheel dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file
-COPY requirements.txt .
+# Precompile python files to pyc for faster startup
+ENV UV_COMPILE_BYTECODE=1
+# Do not create virtualenv since we will install system-wide in builder
+ENV UV_PROJECT_ENVIRONMENT=/usr/local
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy only dependency definitions first
+COPY pyproject.toml uv.lock ./
 
-# Copy the rest of the application
+# Install dependencies using cache mounts. 
+# --no-dev: don't install matplotlib/seaborn
+# --no-install-project: don't install the app code itself yet
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-dev --frozen --no-install-project
+
+# Stage 2: Final minimal runtime image
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+
+# Only install libgomp1 which XGBoost requires at runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the globally installed packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy app code
 COPY . .
 
-# Make entrypoint executable
-RUN chmod +x entrypoint.sh
+# Optimization flags
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    FASTAPI_ENV=production
 
 # Expose port
 EXPOSE 8080
 
-# Run the application via entrypoint
+RUN chmod +x entrypoint.sh
+
 CMD ["./entrypoint.sh"]

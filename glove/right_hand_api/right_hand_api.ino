@@ -22,6 +22,7 @@ const int PIN_BTN_R = 5; // Right button (on right hand glove)
 const int FLEX_PIN_R[5] = {0, 1, -1, 3, 4}; // -1 = ADS1115
 const int ADS_CHANNEL_MID = 1; // ADS1115 channel A0 for middle finger
 
+
 Adafruit_ADS1115 ads;
 
 // =====================================================
@@ -108,6 +109,7 @@ bool bothBtnActive = false;
 
 // Left button signal from left hand (via HC12)
 bool leftBtnPressed = false;
+unsigned long lastLeftBtnTime = 0;
 
 // Calibration tracking
 int calRound = 0;
