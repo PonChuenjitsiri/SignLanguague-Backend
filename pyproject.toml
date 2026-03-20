@@ -37,5 +37,12 @@ dev = [
 ]
 
 [tool.uv]
-extra-index-url = ["https://download.pytorch.org/whl/cpu"]
-conflict-resolution = "lowest-direct"
+resolution = "lowest-direct"
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
