@@ -17,13 +17,13 @@ ENV UV_COMPILE_BYTECODE=1
 ENV UV_PROJECT_ENVIRONMENT=/usr/local
 
 # Copy only dependency definitions first
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml ./
 
 # Install dependencies using cache mounts. 
 # --no-dev: don't install matplotlib/seaborn
 # --no-install-project: don't install the app code itself yet
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --frozen --no-install-project
+    uv sync --no-dev --no-install-project
 
 # Stage 2: Final minimal runtime image
 FROM python:3.11-slim-bookworm
