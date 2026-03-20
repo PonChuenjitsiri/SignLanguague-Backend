@@ -10,7 +10,7 @@ dependencies = [
     "pydantic>=2.9.2",
     "pydantic-settings>=2.5.2",
     "python-dotenv>=1.0.1",
-    "numpy>=1.26.4",
+    "numpy<2.0.0",
     # ML
     "torch>=2.0.0",
     "xgboost>=2.0.0",
