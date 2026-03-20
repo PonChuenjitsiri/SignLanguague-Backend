@@ -22,8 +22,9 @@ COPY pyproject.toml ./
 # Install dependencies using cache mounts. 
 # --no-dev: don't install matplotlib/seaborn
 # --no-install-project: don't install the app code itself yet
+# Pass --resolution=lowest-direct to prevent fetching the bleeding-edge Markupsafe meant for newer Python versions
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --no-install-project
+    uv sync --no-dev --no-install-project --resolution=lowest-direct
 
 # Stage 2: Final minimal runtime image
 FROM python:3.11-slim-bookworm
