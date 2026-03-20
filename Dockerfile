@@ -24,7 +24,7 @@ COPY pyproject.toml ./
 # --no-install-project: don't install the app code itself yet
 # Pass --resolution=lowest-direct to prevent fetching the bleeding-edge Markupsafe meant for newer Python versions
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --no-install-project --resolution=lowest-direct
+    uv sync --no-dev --no-install-project
 
 # Stage 2: Final minimal runtime image
 FROM python:3.11-slim-bookworm

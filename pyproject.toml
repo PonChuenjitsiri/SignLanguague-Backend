@@ -37,8 +37,6 @@ dev = [
 ]
 
 [tool.uv]
-resolution = "lowest-direct"
-
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
