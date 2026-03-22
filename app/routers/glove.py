@@ -94,6 +94,7 @@ class TestSensorData(BaseModel):
     flex: list[int]
     accel: list[float]
     gyro: list[float]
+    battery_voltage: float = 0.0
 
 
 # ══════════════════════════════════════════════════════
@@ -319,17 +320,22 @@ async def gesture_status(device_id: str = "default"):
 
 @router.post("/test/sensors")
 async def receive_test_sensors(data: TestSensorData):
-    """
-    Test endpoint for receiving raw sensor data directly when the button is pressed.
-    """
+    # คำนวณ % battery (LiPo 2.8V=0% → 4.2V=100%)
+    batt_pct = max(0.0, min(100.0, (data.battery_voltage - 2.8) / (4.2 - 2.8) * 100))
+
     print("--- Test Sensor Data Received ---")
-    print(f"Flex: {data.flex}")
-    print(f"Accel: {data.accel}")
-    print(f"Gyro: {data.gyro}")
+    print(f"Flex:            {data.flex}")
+    print(f"Accel:           {data.accel}")
+    print(f"Gyro:            {data.gyro}")
+    print(f"Battery Voltage: {data.battery_voltage:.3f} V  ({batt_pct:.1f}%)")
+
     return {
         "status": "success",
         "message": "Sensor data received",
-        "data": data.model_dump() if hasattr(data, 'model_dump') else data.dict()
+        "data": {
+            **(data.model_dump() if hasattr(data, 'model_dump') else data.dict()),
+            "battery_percent": round(batt_pct, 1)
+        }
     }
 
 
