@@ -1,9 +1,10 @@
+#include <Adafruit_ADS1X15.h>
 #include <Arduino.h>
 #include <MPU9250_asukiaaa.h>
 #include <Preferences.h>
 #include <Wire.h>
 #include <vector>
-#include <Adafruit_ADS1X15.h>
+
 
 HardwareSerial HC12(1);
 #define HC12_RX 20
@@ -15,9 +16,9 @@ HardwareSerial HC12(1);
 // Finger order: [0]=Thumb, [1]=Index, [2]=Middle(ADS), [3]=Ring, [4]=Pinky
 const int FLEX_PIN_L[5] = {0, 1, -1, 3, 4}; // -1 = ADS1115
 const int ADS_CHANNEL_MID = 2;
-const uint8_t SIG_VBAT  = 0xEB;
-const int ADS_CH_VBAT   = 0;       // ใช้ A0 เดียวกัน (ADS_CHANNEL_MID อยู่ที่ A2)
-const float VBAT_RATIO  = 2.0f;
+const uint8_t SIG_VBAT = 0xEB;
+const int ADS_CH_VBAT = 0; // ใช้ A0 เดียวกัน (ADS_CHANNEL_MID อยู่ที่ A2)
+const float VBAT_RATIO = 2.0f;
 
 const unsigned long VBAT_INTERVAL = 5000;
 
@@ -189,15 +190,23 @@ void calibrateLeft() {
     Serial.println("   [ACTION] OPEN hand -> Press Button");
     sendCalUpdate(CAL_OPEN, round); // notify right hand → API
     waitForUserAction();
-    { int rawF[5]; readFlexSensors(rawF);
-      for (int i = 0; i < 5; i++) sumOpen[i] += rawF[i]; }
+    {
+      int rawF[5];
+      readFlexSensors(rawF);
+      for (int i = 0; i < 5; i++)
+        sumOpen[i] += rawF[i];
+    }
 
     // --- Close hand ---
     Serial.println("   [ACTION] CLOSE hand -> Press Button");
     sendCalUpdate(CAL_CLOSE, round); // notify right hand → API
     waitForUserAction();
-    { int rawF[5]; readFlexSensors(rawF);
-      for (int i = 0; i < 5; i++) sumClose[i] += rawF[i]; }
+    {
+      int rawF[5];
+      readFlexSensors(rawF);
+      for (int i = 0; i < 5; i++)
+        sumClose[i] += rawF[i];
+    }
 
     blinkLED(2, 100);
   }
@@ -241,20 +250,21 @@ void sendDataToMaster() {
   storage.clear();
 }
 
-
 float readBatteryVoltage() {
-  if (!adsReady) return -1.0f;
+  if (!adsReady)
+    return -1.0f;
   int16_t raw = ads.readADC_SingleEnded(ADS_CH_VBAT);
   return (raw * 0.125f / 1000.0f) * VBAT_RATIO;
 }
 
 void sendVbatToMaster() {
   float v = readBatteryVoltage();
-  if (v < 0) return;
-  int16_t mv = (int16_t)(v * 1000.0f);  // แปลงเป็น mV เก็บใน 2 bytes
+  if (v < 0)
+    return;
+  int16_t mv = (int16_t)(v * 1000.0f); // แปลงเป็น mV เก็บใน 2 bytes
   HC12.write(SIG_VBAT);
-  HC12.write((uint8_t)(mv >> 8));        // high byte
-  HC12.write((uint8_t)(mv & 0xFF));      // low byte
+  HC12.write((uint8_t)(mv >> 8));   // high byte
+  HC12.write((uint8_t)(mv & 0xFF)); // low byte
   Serial.printf("[VBAT] Sent left voltage: %.3fV\n", v);
 }
 
@@ -304,7 +314,7 @@ void loop() {
       isRecording = false;
       Serial.println("CMD: STOP → Sending data...");
       sendDataToMaster();
-    } else if (cmd == CMD_ABORT) {    // <--- เพิ่มตรงนี้
+    } else if (cmd == CMD_ABORT) { // <--- เพิ่มตรงนี้
       isRecording = false;
       storage.clear();
       memset(&lastData, 0, sizeof(GloveData));
@@ -327,7 +337,8 @@ void loop() {
       if (mpu.accelUpdate() == 0 && mpu.gyroUpdate() == 0) {
         GloveData d;
         readMPU(d);
-        int rawF[5]; readFlexSensors(rawF);
+        int rawF[5];
+        readFlexSensors(rawF);
         for (int i = 0; i < 5; i++) {
           if (isCalibrated) {
             int clipped = constrain(rawF[i], min(flexMin[i], flexMax[i]),
@@ -355,7 +366,7 @@ void loop() {
   static uint32_t lastDebounceTime = 0;
   static int lastReading = LOW;
   static int btnState = LOW;
-  
+
   int reading = digitalRead(PIN_BUTTON);
   if (reading != lastReading) {
     lastDebounceTime = millis();

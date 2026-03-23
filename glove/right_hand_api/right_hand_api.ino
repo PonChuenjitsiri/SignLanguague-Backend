@@ -1,9 +1,9 @@
+#include <Adafruit_ADS1X15.h>
 #include <Arduino.h>
 #include <MPU9250_asukiaaa.h>
 #include <Preferences.h>
 #include <Wire.h>
 #include <vector>
-#include <Adafruit_ADS1X15.h>
 
 // --- WiFi & HTTP ---
 #include <HTTPClient.h>
@@ -20,8 +20,8 @@ const int PIN_BTN_R = 5;
 const int FLEX_PIN_R[5] = {0, 1, -1, 3, 4};
 const int ADS_CHANNEL_MID = 2;
 const uint8_t SIG_VBAT = 0xEB;
-const int ADS_CH_VBAT = 0;      // ADS channel A0 สำหรับ voltage divider
-const float VBAT_RATIO = 2.0;   // R1=R2=10k → คูณ 2 คืน
+const int ADS_CH_VBAT = 0;    // ADS channel A0 สำหรับ voltage divider
+const float VBAT_RATIO = 2.0; // R1=R2=10k → คูณ 2 คืน
 
 float leftVoltage = -1.0f;
 
@@ -30,7 +30,7 @@ Adafruit_ADS1115 ads;
 const char *service_name = "PROV_ESP32_C3";
 const char *pop = "123456";
 
-const String SERVER_URL = "http://bai-back.onepointfive.life";
+const String SERVER_URL = "https://smb.pon-hub.com";
 const String DEVICE_ID = "default";
 
 const unsigned long HEARTBEAT_INTERVAL = 5000;
@@ -58,23 +58,29 @@ struct GloveData {
 MPU9250_asukiaaa mpu;
 bool adsReady = false;
 
-const uint8_t CMD_START   = 0xA1;
-const uint8_t CMD_STOP    = 0xA2;
+const uint8_t CMD_START = 0xA1;
+const uint8_t CMD_STOP = 0xA2;
 const uint8_t CMD_CAL_LEFT = 0xA3;
 const uint8_t CMD_ABORT = 0xA4;
-const uint8_t CMD_DATA    = 0xD1;
-const uint8_t CMD_END     = 0xD2;
-const uint8_t SIG_CANCEL  = 0xEE;
+const uint8_t CMD_DATA = 0xD1;
+const uint8_t CMD_END = 0xD2;
+const uint8_t SIG_CANCEL = 0xEE;
 
-const uint8_t CAL_OPEN  = 0xC1;
+const uint8_t CAL_OPEN = 0xC1;
 const uint8_t CAL_CLOSE = 0xC2;
-const uint8_t CAL_DONE  = 0xC3;
+const uint8_t CAL_DONE = 0xC3;
 
 std::vector<GloveData> bufL, bufR;
 GloveData lastDataR;
-GloveData zeroData = {{0,0,0,0,0},{0,0,0},{0,0,0}};
+GloveData zeroData = {{0, 0, 0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
 
-enum State { IDLE, RECORDING, RECEIVING_LEFT, CALIBRATING_RIGHT, CALIBRATING_LEFT };
+enum State {
+  IDLE,
+  RECORDING,
+  RECEIVING_LEFT,
+  CALIBRATING_RIGHT,
+  CALIBRATING_LEFT
+};
 State currentState = IDLE;
 
 bool is_connected = false;
@@ -117,10 +123,12 @@ void SysProvEvent(arduino_event_t *sys_event) {
   switch (sys_event->event_id) {
   case ARDUINO_EVENT_PROV_START:
     Serial.println("\nProvisioning Started. Open 'ESP BLE Provisioning' App!");
-    Serial.print("Device Name: "); Serial.println(service_name);
+    Serial.print("Device Name: ");
+    Serial.println(service_name);
     break;
   case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-    Serial.print("\nConnected! IP: "); Serial.println(WiFi.localIP());
+    Serial.print("\nConnected! IP: ");
+    Serial.println(WiFi.localIP());
     is_connected = true;
     break;
   case ARDUINO_EVENT_PROV_CRED_RECV:
@@ -129,7 +137,8 @@ void SysProvEvent(arduino_event_t *sys_event) {
   case ARDUINO_EVENT_PROV_END:
     Serial.println("\nProvisioning Ended.");
     break;
-  default: break;
+  default:
+    break;
   }
 }
 
@@ -137,7 +146,8 @@ void SysProvEvent(arduino_event_t *sys_event) {
 // HTTP Helpers
 // =====================================================
 bool httpPost(String path, String jsonBody) {
-  if (!is_connected) return false;
+  if (!is_connected)
+    return false;
   HTTPClient http;
   http.begin(SERVER_URL + path);
   http.addHeader("Content-Type", "application/json");
@@ -149,28 +159,29 @@ bool httpPost(String path, String jsonBody) {
     Serial.printf("[HTTP %d] %s -> %s\n", code, path.c_str(), resp.c_str());
     return (code >= 200 && code < 300);
   } else {
-    Serial.printf("[HTTP ERROR] %s -> %s\n", path.c_str(), http.errorToString(code).c_str());
+    Serial.printf("[HTTP ERROR] %s -> %s\n", path.c_str(),
+                  http.errorToString(code).c_str());
     return false;
   }
 }
 
 void sendHeartbeat() {
   float rightV = readBatteryVoltage();
-  String body = "{\"device_id\":\"" + DEVICE_ID + "\","
-    + "\"right_voltage\":" + String(rightV, 3) + ","
-    + "\"left_voltage\":"  + String(leftVoltage, 3) + "}";
+  String body = "{\"device_id\":\"" + DEVICE_ID + "\"," +
+                "\"right_voltage\":" + String(rightV, 3) + "," +
+                "\"left_voltage\":" + String(leftVoltage, 3) + "}";
   httpPost("/api/glove/heartbeat", body);
 }
 
 void apiCalibrateStart(String hand) {
   httpPost("/api/glove/calibrate/start",
-    "{\"device_id\":\"" + DEVICE_ID + "\",\"hand\":\"" + hand + "\"}");
+           "{\"device_id\":\"" + DEVICE_ID + "\",\"hand\":\"" + hand + "\"}");
 }
 
 void apiCalibrateUpdate(String step, int round) {
   httpPost("/api/glove/calibrate/update",
-    "{\"device_id\":\"" + DEVICE_ID + "\",\"step\":\"" + step +
-    "\",\"round\":" + String(round) + "}");
+           "{\"device_id\":\"" + DEVICE_ID + "\",\"step\":\"" + step +
+               "\",\"round\":" + String(round) + "}");
 }
 
 void apiGestureStart() {
@@ -198,9 +209,11 @@ void sendPredictRaw() {
 
   String rawData = "";
   for (int i = 0; i < maxFrames; i++) {
-    if (i == 0) rawData += "S ";
+    if (i == 0)
+      rawData += "S ";
     rawData += d2s(bufL[i]) + " " + d2s(bufR[i]);
-    if (i == maxFrames - 1) rawData += " E";
+    if (i == maxFrames - 1)
+      rawData += " E";
     rawData += "\n";
   }
   rawData.replace("\"", "\\\"");
@@ -213,7 +226,8 @@ void sendPredictRaw() {
 }
 
 float readBatteryVoltage() {
-  if (!adsReady) return -1.0f;
+  if (!adsReady)
+    return -1.0f;
   int16_t raw = ads.readADC_SingleEnded(ADS_CH_VBAT);
   return (raw * 0.125f / 1000.0f) * VBAT_RATIO;
 }
@@ -249,37 +263,43 @@ void loadCalibrationFromFlash() {
 // =====================================================
 void blinkLED(int times, int duration) {
   for (int i = 0; i < times; i++) {
-    digitalWrite(PIN_LED, HIGH); delay(duration);
+    digitalWrite(PIN_LED, HIGH);
+    delay(duration);
     digitalWrite(PIN_LED, LOW);
-    if (i < times - 1) delay(duration);
+    if (i < times - 1)
+      delay(duration);
   }
 }
 
 void readMPU(GloveData &d) {
-  mpu.accelUpdate(); mpu.gyroUpdate();
+  mpu.accelUpdate();
+  mpu.gyroUpdate();
   d.accel[0] = (int16_t)(mpu.accelX() * 100);
   d.accel[1] = (int16_t)(mpu.accelY() * 100);
   d.accel[2] = (int16_t)(mpu.accelZ() * 100);
-  d.gyro[0]  = (int16_t)(mpu.gyroX() * 100);
-  d.gyro[1]  = (int16_t)(mpu.gyroY() * 100);
-  d.gyro[2]  = (int16_t)(mpu.gyroZ() * 100);
+  d.gyro[0] = (int16_t)(mpu.gyroX() * 100);
+  d.gyro[1] = (int16_t)(mpu.gyroY() * 100);
+  d.gyro[2] = (int16_t)(mpu.gyroZ() * 100);
 }
 
 void waitForUserAction() {
-  while (digitalRead(PIN_BTN_R) == HIGH) delay(10);
+  while (digitalRead(PIN_BTN_R) == HIGH)
+    delay(10);
   delay(100);
-  while (digitalRead(PIN_BTN_R) == LOW)  delay(10);
+  while (digitalRead(PIN_BTN_R) == LOW)
+    delay(10);
   delay(100);
-  while (digitalRead(PIN_BTN_R) == HIGH) delay(10);
+  while (digitalRead(PIN_BTN_R) == HIGH)
+    delay(10);
   delay(100);
 }
 
 String d2s(GloveData d) {
   char b[128];
   snprintf(b, sizeof(b), "%d %d %d %d %d %.2f %.2f %.2f %.2f %.2f %.2f",
-    d.flex[0], d.flex[1], d.flex[2], d.flex[3], d.flex[4],
-    d.accel[0]/100.0, d.accel[1]/100.0, d.accel[2]/100.0,
-    d.gyro[0]/100.0,  d.gyro[1]/100.0,  d.gyro[2]/100.0);
+           d.flex[0], d.flex[1], d.flex[2], d.flex[3], d.flex[4],
+           d.accel[0] / 100.0, d.accel[1] / 100.0, d.accel[2] / 100.0,
+           d.gyro[0] / 100.0, d.gyro[1] / 100.0, d.gyro[2] / 100.0);
   return String(b);
 }
 
@@ -297,12 +317,16 @@ void readFlexSensors(int raw[5]) {
 }
 
 bool checkMovementR(GloveData current) {
-  if (bufR.empty()) return true;
+  if (bufR.empty())
+    return true;
   for (int i = 0; i < 5; i++)
-    if (abs((int)current.flex[i] - (int)lastDataR.flex[i]) > t_flex) return true;
+    if (abs((int)current.flex[i] - (int)lastDataR.flex[i]) > t_flex)
+      return true;
   for (int k = 0; k < 3; k++) {
-    if (abs(current.accel[k] - lastDataR.accel[k]) > (T_ACCEL * 100)) return true;
-    if (abs(current.gyro[k]  - lastDataR.gyro[k])  > (T_GYRO  * 100)) return true;
+    if (abs(current.accel[k] - lastDataR.accel[k]) > (T_ACCEL * 100))
+      return true;
+    if (abs(current.gyro[k] - lastDataR.gyro[k]) > (T_GYRO * 100))
+      return true;
   }
   return false;
 }
@@ -317,8 +341,8 @@ void calibrateRight() {
   blinkLED(5, 100);
   digitalWrite(PIN_LED, HIGH);
 
-  long sumOpen[5]  = {0,0,0,0,0};
-  long sumClose[5] = {0,0,0,0,0};
+  long sumOpen[5] = {0, 0, 0, 0, 0};
+  long sumClose[5] = {0, 0, 0, 0, 0};
 
   for (int round = 1; round <= 5; round++) {
     Serial.printf(">> ROUND %d/5\n", round);
@@ -327,25 +351,35 @@ void calibrateRight() {
     apiCalibrateUpdate("open", round);
     waitForUserAction();
     digitalWrite(PIN_LED, LOW);
-    { int rawF[5]; readFlexSensors(rawF);
-      for (int i = 0; i < 5; i++) sumOpen[i] += rawF[i]; }
+    {
+      int rawF[5];
+      readFlexSensors(rawF);
+      for (int i = 0; i < 5; i++)
+        sumOpen[i] += rawF[i];
+    }
     Serial.println(" Read Open Done.");
 
     Serial.println(" [ACTION] CLOSE hand -> Press Button");
     apiCalibrateUpdate("close", round);
     waitForUserAction();
-    { int rawF[5]; readFlexSensors(rawF);
-      for (int i = 0; i < 5; i++) sumClose[i] += rawF[i]; }
+    {
+      int rawF[5];
+      readFlexSensors(rawF);
+      for (int i = 0; i < 5; i++)
+        sumClose[i] += rawF[i];
+    }
     Serial.println(" Read Close Done.");
 
     blinkLED(2, 100);
-    if (round < 5) digitalWrite(PIN_LED, HIGH);
+    if (round < 5)
+      digitalWrite(PIN_LED, HIGH);
   }
 
   for (int i = 0; i < 5; i++) {
     flexMin[i] = sumOpen[i] / 5;
     flexMax[i] = sumClose[i] / 5;
-    if (flexMin[i] == flexMax[i]) flexMax[i] += 1;
+    if (flexMin[i] == flexMax[i])
+      flexMax[i] += 1;
     Serial.printf(" F%d Min: %d | Max: %d\n", i, flexMin[i], flexMax[i]);
   }
   t_flex = 10;
@@ -357,7 +391,8 @@ void calibrateRight() {
   blinkLED(3, 200);
 
   currentState = IDLE;
-  while (digitalRead(PIN_BTN_R) == HIGH) delay(10);
+  while (digitalRead(PIN_BTN_R) == HIGH)
+    delay(10);
   isBtnHeld = false;
   actionTriggered = false;
 }
@@ -446,17 +481,18 @@ void loop() {
         leftVoltage = mv / 1000.0f;
         Serial.printf("[HC12] Left voltage: %.3fV\n", leftVoltage);
       }
-  }
+    }
 
     if (hdr == SIG_CANCEL) {
       if (currentState == RECORDING) {
         Serial.println("[LEFT BTN] Clear data -> restart recording");
-        bufL.clear(); bufR.clear();
-        memset(&lastDataR, 0, sizeof(GloveData)); // ล้างค่า lastData ด้วย จะได้วัดการเคลื่อนไหวใหม่ถูก
+        bufL.clear();
+        bufR.clear();
+        memset(&lastDataR, 0,
+               sizeof(GloveData)); // ล้างค่า lastData ด้วย จะได้วัดการเคลื่อนไหวใหม่ถูก
         blinkLED(2, 100);
       }
-    }
-    else if (hdr == CMD_CAL_LEFT) {
+    } else if (hdr == CMD_CAL_LEFT) {
       delay(10);
       if (HC12.available() >= 2) {
         uint8_t calCmd = HC12.read();
@@ -468,20 +504,20 @@ void loop() {
           handleLeftCalibrationUpdate(calCmd, calRnd);
         }
       }
-    }
-    else if (hdr == CMD_DATA && currentState == RECEIVING_LEFT) {
+    } else if (hdr == CMD_DATA && currentState == RECEIVING_LEFT) {
       GloveData temp;
-      if (HC12.readBytes((uint8_t *)&temp, sizeof(GloveData)) == sizeof(GloveData)) {
+      if (HC12.readBytes((uint8_t *)&temp, sizeof(GloveData)) ==
+          sizeof(GloveData)) {
         bufL.push_back(temp);
       }
-    }
-    else if (hdr == CMD_END && currentState == RECEIVING_LEFT) {
+    } else if (hdr == CMD_END && currentState == RECEIVING_LEFT) {
       Serial.println("Left data received. Sending to backend...");
-      bufL.clear(); bufR.clear();
+      bufL.clear();
+      bufR.clear();
       memset(&lastDataR, 0, sizeof(GloveData));
-      HC12.write(CMD_START); 
-      
-      currentState = RECORDING; 
+      HC12.write(CMD_START);
+
+      currentState = RECORDING;
       Serial.println(">> READY FOR NEXT GESTURE (Continuous Mode)");
     }
   }
@@ -504,13 +540,14 @@ void loop() {
         if (currentState == RECORDING) {
           actionTriggered = true;
           Serial.println(">> RIGHT BTN 2s HOLD -> ABORT RECORDING");
-          
-          apiGestureStop();        // ยิง API Stop ตามที่ต้องการ
-          HC12.write(CMD_ABORT);   // สั่งให้ซ้ายล้างข้อมูลและกลับไป IDLE
-          
-          bufL.clear(); bufR.clear();
+
+          apiGestureStop();      // ยิง API Stop ตามที่ต้องการ
+          HC12.write(CMD_ABORT); // สั่งให้ซ้ายล้างข้อมูลและกลับไป IDLE
+
+          bufL.clear();
+          bufR.clear();
           memset(&lastDataR, 0, sizeof(GloveData));
-          
+
           currentState = IDLE;
           blinkLED(3, 150);
           isBtnHeld = false;
@@ -534,7 +571,8 @@ void loop() {
       if (!actionTriggered && (millis() - btnPressStart > 50)) {
         if (currentState == IDLE) {
           currentState = RECORDING;
-          bufL.clear(); bufR.clear();
+          bufL.clear();
+          bufR.clear();
           HC12.write(CMD_START);
           apiGestureStart();
           Serial.println(">> GESTURE START");
@@ -560,11 +598,12 @@ void loop() {
       if (mpu.accelUpdate() == 0 && mpu.gyroUpdate() == 0) {
         GloveData d;
         readMPU(d);
-        int rawF[5]; readFlexSensors(rawF);
+        int rawF[5];
+        readFlexSensors(rawF);
         for (int i = 0; i < 5; i++) {
           if (isCalibrated) {
             int clipped = constrain(rawF[i], min(flexMin[i], flexMax[i]),
-                                             max(flexMin[i], flexMax[i]));
+                                    max(flexMin[i], flexMax[i]));
             d.flex[i] = map(clipped, flexMin[i], flexMax[i], 0, 100);
           } else {
             d.flex[i] = rawF[i];
