@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api/glove", tags=["Glove Status"])
 _heartbeats: Dict[str, datetime] = {}
 _gesture_state: Dict[str, bool] = {}  # { device_id: gesture_active }
 _calibrated_hands: Dict[str, Dict[str, bool]] = {}  # { device_id: {"left": False, "right": False} }
+_battery_info: Dict[str, dict] = {}  # { device_id: {"right_voltage": 0.0, "left_voltage": -1.0} }
 
 
 class CalibrationStep(str, Enum):
@@ -40,6 +41,8 @@ ACTION_TEXT = {
 # ======================================================
 class HeartbeatRequest(BaseModel):
     device_id: str = Field(default="default", description="Unique ID of the glove device")
+    right_voltage: float = Field(default=0.0, description="Right hand battery voltage")
+    left_voltage: float = Field(default=-1.0, description="Left hand battery voltage")
 
 
 class HeartbeatResponse(BaseModel):
@@ -94,7 +97,7 @@ class TestSensorData(BaseModel):
     flex: list[int]
     accel: list[float]
     gyro: list[float]
-    battery_voltage: float = 0.0
+    voltage: float = 0.0
 
 
 # ══════════════════════════════════════════════════════
@@ -111,6 +114,18 @@ async def heartbeat(request: HeartbeatRequest = HeartbeatRequest()):
     """
     now = datetime.now(timezone.utc)
     _heartbeats[request.device_id] = now
+    
+    def calc_battery(v: float) -> float:
+        if v < 0: return 0.0
+        return max(0.0, min(100.0, (v - 3.3) / (4.2 - 3.3) * 100.0))
+        
+    _battery_info[request.device_id] = {
+        "right_voltage": request.right_voltage,
+        "left_voltage": request.left_voltage,
+        "right_battery": calc_battery(request.right_voltage),
+        "left_battery": calc_battery(request.left_voltage)
+    }
+    
     sentence_buffer._notify_change()  # trigger WS update
 
     return HeartbeatResponse(
@@ -321,13 +336,13 @@ async def gesture_status(device_id: str = "default"):
 @router.post("/test/sensors")
 async def receive_test_sensors(data: TestSensorData):
     # คำนวณ % battery (LiPo 2.8V=0% → 4.2V=100%)
-    batt_pct = max(0.0, min(100.0, (data.battery_voltage - 2.8) / (4.2 - 2.8) * 100))
+    batt_pct = max(0.0, min(100.0, (data.voltage - 2.8) / (4.2 - 2.8) * 100))
 
     print("--- Test Sensor Data Received ---")
     print(f"Flex:            {data.flex}")
     print(f"Accel:           {data.accel}")
     print(f"Gyro:            {data.gyro}")
-    print(f"Battery Voltage: {data.battery_voltage:.3f} V  ({batt_pct:.1f}%)")
+    print(f"voltage: {data.voltage:.3f} V  ({batt_pct:.1f}%)")
 
     return {
         "status": "success",
@@ -397,6 +412,7 @@ async def ws_unified(websocket: WebSocket, device_id: str = "default"):
                     _gesture_state.pop(device_id, None)
                     _calibration_state.pop(device_id, None)
                     _calibrated_hands.pop(device_id, None)
+                    _battery_info.pop(device_id, None)
                     await sentence_buffer.clear()
                     online = False
                     last_hb = None
@@ -426,6 +442,9 @@ async def ws_unified(websocket: WebSocket, device_id: str = "default"):
             # --- Calibration flags ---
             cal_hands = _calibrated_hands.get(device_id, {"left": False, "right": False})
 
+            # --- Battery ---
+            batt_info = _battery_info.get(device_id, {})
+
             await websocket.send_json({
                 "status": "online" if online else "offline",
                 "state": state,
@@ -438,6 +457,10 @@ async def ws_unified(websocket: WebSocket, device_id: str = "default"):
                 "word_count": ws_sentence["word_count"],
                 "calibrate_left": cal_hands.get("left", False),
                 "calibrate_right": cal_hands.get("right", False),
+                "right_voltage": batt_info.get("right_voltage", 0.0),
+                "right_battery": batt_info.get("right_battery", 0.0),
+                "left_voltage": batt_info.get("left_voltage", 0.0),
+                "left_battery": batt_info.get("left_battery", 0.0),
             })
     except WebSocketDisconnect:
         pass
