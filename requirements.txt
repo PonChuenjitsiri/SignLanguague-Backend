@@ -13,3 +13,10 @@ scipy>=1.11.0
 pandas>=2.1.0
 # Serial port (for data collection)
 pyserial>=3.5
+openpyxl>=3.1.0
+
+minio>=7.2.0
+
+python-multipart>=0.0.6
+
+

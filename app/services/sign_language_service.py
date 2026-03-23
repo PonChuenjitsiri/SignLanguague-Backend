@@ -70,3 +70,42 @@ class SignLanguageService:
         return await collection.find_one(
             {"titleEng": {"$regex": f"^{title_eng}$", "$options": "i"}}
         )
+
+    @staticmethod
+    async def find_by_label(predicted_label: str) -> Optional[dict]:
+        """
+        Find a sign language entry by matching the model's predicted label
+        against the 'label' field in the database.
+
+        Handles variant labels like:
+          - "no_right" or "no_left" → tries "no_right", then "no"
+          - "hello" → tries "hello" directly
+
+        Strips directional suffixes (_right, _left) as fallback.
+        """
+        collection = SignLanguageService._get_collection()
+
+        # 1. Exact match first
+        entry = await collection.find_one(
+            {"label": {"$regex": f"^{predicted_label}$", "$options": "i"}}
+        )
+        if entry:
+            return entry
+
+        # 2. Strip directional suffixes and try again
+        suffixes = ["_right", "_left", "_r", "_l"]
+        base_label = predicted_label
+        for suffix in suffixes:
+            if base_label.endswith(suffix):
+                base_label = base_label[: -len(suffix)]
+                break
+
+        if base_label != predicted_label:
+            entry = await collection.find_one(
+                {"label": {"$regex": f"^{base_label}$", "$options": "i"}}
+            )
+            if entry:
+                return entry
+
+        # 3. Fallback: try matching titleEng
+        return await SignLanguageService.find_by_title_eng(predicted_label)

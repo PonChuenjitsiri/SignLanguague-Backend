@@ -10,7 +10,7 @@ dependencies = [
     "pydantic>=2.9.2",
     "pydantic-settings>=2.5.2",
     "python-dotenv>=1.0.1",
-    "numpy>=1.26.4",
+    "numpy<2.0.0",
     # ML
     "torch>=2.0.0",
     "xgboost>=2.0.0",
@@ -19,13 +19,28 @@ dependencies = [
     "pandas>=2.1.0",
     # Serial port (data collection)
     "pyserial>=3.5",
+    # Excel (seed script)
+    "openpyxl>=3.1.0",
+    # MinIO (file storage)
+    "minio>=7.2.0",
+    # File upload
+    "python-multipart>=0.0.6",
 ]
 
 [project.scripts]
 train = "app.services.train_model:train"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "matplotlib>=3.8.0",
     "seaborn>=0.13.0",
 ]
+
+[tool.uv]
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }

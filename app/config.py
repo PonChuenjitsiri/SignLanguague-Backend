@@ -3,7 +3,8 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    MONGODB_URL: str = "mongodb://localhost:27017"
+    MONGODB_URL: str = "mongodb://admin:smartglove2026@localhost:27017/smart_glove?authSource=admin"
+
     DATABASE_NAME: str = "smart_glove"
     MODEL_PATH: str = "models/sign_language_model.pkl"
 
@@ -18,6 +19,9 @@ class Settings(BaseSettings):
     # Training config
     EXPECTED_FRAMES: int = 70
     NUM_FEATURES: int = 22
+
+    # Glove heartbeat
+    GLOVE_HEARTBEAT_TIMEOUT: int = 10  # seconds before glove is considered offline
 
     class Config:
         env_file = ".env"

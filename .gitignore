@@ -27,8 +27,8 @@ env/
 Thumbs.db
 
 # Trained models
-app/models_trained/*.pth
-app/models_trained/*.json
+# app/models_trained/*.pth
+# app/models_trained/*.json
 
 # UV
 uv.lock
@@ -38,3 +38,12 @@ README.md
 
 #dataset
 app/dataset/
+dataset/
+
+# *.ino
+
+*.html
+
+normalize_flex.py
+
+test_payloads/

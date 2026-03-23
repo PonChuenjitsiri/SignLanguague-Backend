@@ -3,7 +3,7 @@ db = db.getSiblingDB("smart_glove");
 
 db.createUser({
   user: "smartglove",
-  pwd: "smartglove2025",
+  pwd: "smartglove2026",
   roles: [{ role: "readWrite", db: "smart_glove" }],
 });
 
