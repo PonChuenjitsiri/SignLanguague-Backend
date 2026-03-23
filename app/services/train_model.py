@@ -8,6 +8,8 @@ Reads CSV data from DATASET_DIR, trains both models, and saves them
 to app/models_trained/.
 """
 
+import argparse
+
 import numpy as np
 import pandas as pd
 import os
@@ -20,6 +22,7 @@ from scipy.interpolate import interp1d
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_score, recall_score, f1_score
 import xgboost as xgb
+from app.services.model_manager import model_manager
 
 from app.config import get_settings
 
@@ -134,8 +137,13 @@ def load_dataset(data_dir, expected_frames):
 # ======================================================
 # 4. Training Pipeline
 # ======================================================
-def train():
-    """Full training pipeline: CNN-LSTM + XGBoost + Ensemble evaluation."""
+def train(model_name: str):
+    """Full training pipeline: CNN-LSTM + XGBoost + Ensemble evaluation -> Save Local -> Upload to MinIO."""
+
+    # จัดการชื่อไฟล์โดยใช้ model_name ที่ผู้ใช้ตั้งให้
+    PYTORCH_MODEL_PATH = os.path.join(OUTPUT_DIR, f"{model_name}_cnnlstm.pth")
+    XGB_MODEL_PATH = os.path.join(OUTPUT_DIR, f"{model_name}_xgb.json")
+    LABELS_FILE = os.path.join(OUTPUT_DIR, f"{model_name}_labels_map.json")
 
     X_3d, y, labels_map = load_dataset(DATA_DIR, EXPECTED_FRAMES)
     if X_3d is None:
@@ -171,7 +179,7 @@ def train():
     # Train CNN-LSTM
     # --------------------------------------------------
     print(f"\n{'='*50}")
-    print(f"Training CNN-LSTM (PyTorch)")
+    print(f"Training CNN-LSTM (PyTorch) for '{model_name}'")
     print(f"{'='*50}")
 
     cnn_lstm_model = CNNLSTM(num_classes=num_classes, num_features=NUM_FEATURES)
@@ -221,7 +229,7 @@ def train():
     # Train XGBoost
     # --------------------------------------------------
     print(f"\n{'='*50}")
-    print(f"Training XGBoost")
+    print(f"Training XGBoost for '{model_name}'")
     print(f"{'='*50}")
 
     xgb_model = xgb.XGBClassifier(
@@ -310,8 +318,34 @@ def train():
     print(f"\n--- Detailed Classification Report ---")
     print(classification_report(y_test, preds_ensemble, target_names=list(labels_map.values()), zero_division=0))
 
-    print(f"\n✅ Training complete! Models saved to {OUTPUT_DIR}/")
+    print(f"\n✅ Training complete! Local models saved to {OUTPUT_DIR}/")
 
+    # --------------------------------------------------
+    # Upload to MinIO
+    # --------------------------------------------------
+    print(f"\n{'='*50}")
+    print(f"Uploading files to MinIO...")
+    print(f"{'='*50}")
+    try:
+        model_manager.upload_model(
+            model_name=model_name,
+            pth_path=PYTORCH_MODEL_PATH,
+            xgb_path=XGB_MODEL_PATH,
+            labels_path=LABELS_FILE
+        )
+        print(f"\n✅ SUCCESS: Model '{model_name}' is fully trained and synced to MinIO!")
+    except Exception as e:
+        print(f"\n❌ FAILED to upload to MinIO: {e}")
+        print("Models are only saved locally.")
 
 if __name__ == "__main__":
-    train()
+    parser = argparse.ArgumentParser(description="Train and upload gesture models.")
+    parser.add_argument(
+        "--model-name", 
+        type=str, 
+        required=True, 
+        help="Name of the model version (e.g., v1, experiment-x)"
+    )
+    args = parser.parse_args()
+
+    train(model_name=args.model_name)

@@ -3,22 +3,34 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import connect_db, close_db
-from app.routers import sign_language, sensor_data, data_collector, upload, glove
+from app.routers import sign_language, sensor_data, data_collector, upload, glove, predict
 from app.services.prediction_service import PredictionService
 from app.services.minio_service import MinioService
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown events."""
-    # Startup
+    # 1. เชื่อมต่อ Database
     await connect_db()
-    PredictionService.load_model()
+    
+    # 2. โหลดโมเดล (แก้ไขตรงนี้)
+    try:
+        # สร้าง instance และระบุชื่อไฟล์โมเดล (สมมติว่าชื่อตามใน .env หรือ default)
+        predictor = PredictionService()
+        predictor.load_model(model_name="sign_language_model.pkl") 
+        print("✅ Prediction model loaded successfully.")
+    except Exception as e:
+        print(f"⚠️ Could not load prediction model: {e}")
+        print("👉 Make sure you run 'uv run python -m app.services.train_model' first.")
+
+    # 3. เช็ค MinIO
     try:
         MinioService.ensure_bucket()
     except Exception as e:
-        print(f"⚠️  MinIO not available: {e}")
+        print(f"⚠️ MinIO not available: {e}")
+
     yield
+    
     # Shutdown
     await close_db()
 
@@ -45,6 +57,7 @@ app.include_router(sensor_data.router)
 app.include_router(data_collector.router)
 app.include_router(upload.router)
 app.include_router(glove.router)
+app.include_router(predict.router)
 
 
 @app.get("/", tags=["Health"])

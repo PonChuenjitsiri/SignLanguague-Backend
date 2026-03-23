@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   mongodb:
-    image: mongo:4.4.29
+    image: mongo:latest
     container_name: smartglove-mongodb
     restart: unless-stopped
     ports:

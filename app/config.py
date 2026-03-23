@@ -1,10 +1,8 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
-
 class Settings(BaseSettings):
     MONGODB_URL: str = "mongodb://admin:smartglove2026@localhost:27017/smart_glove?authSource=admin"
-
     DATABASE_NAME: str = "smart_glove"
     MODEL_PATH: str = "models/sign_language_model.pkl"
 
@@ -23,11 +21,20 @@ class Settings(BaseSettings):
     # Glove heartbeat
     GLOVE_HEARTBEAT_TIMEOUT: int = 10  # seconds before glove is considered offline
 
+    # ==========================================
+    # เพิ่ม MinIO Config ตรงนี้ให้ตรงกับ .env
+    # ==========================================
+    MINIO_ENDPOINT: str
+    MINIO_PUBLIC_URL: str
+    MINIO_ACCESS_KEY: str
+    MINIO_SECRET_KEY: str
+    MINIO_BUCKET: str
+    MINIO_SECURE: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
         extra = "ignore" 
-
 
 @lru_cache()
 def get_settings() -> Settings:
