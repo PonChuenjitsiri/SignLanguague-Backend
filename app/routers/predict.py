@@ -44,7 +44,7 @@ async def predict_gesture(payload: PredictRequest):
         # 3. ส่งข้อมูลที่สะอาดแล้วให้ PredictionService ทำนาย
         result = prediction_service.predict(
             model_name=payload.model_name,
-            frames=frames_2d  # 👈 เปลี่ยนจาก raw_data เป็น frames ที่ parse แล้ว
+            raw_data=frames_2d  # 👈 เปลี่ยนจาก raw_data เป็น frames ที่ parse แล้ว
         )
         
         if "error" in result:
