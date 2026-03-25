@@ -54,7 +54,7 @@ async def _predict_and_buffer(frames_2d: list, source: str = "api", model_name: 
 
     try:
         # 🌟 ลบ if-else ออก ใช้ PredictionService ตัวพิมพ์ใหญ่แบบดั้งเดิมตัวเดียวจบ! 🌟
-        predicted_sign, ensemble_conf, cnn_conf, xgb_conf = PredictionService.predict(
+        predicted_sign, ensemble_conf, cnn_conf, xgb_conf = PredictionService().predict(
             model_name=model_name, 
             raw_data=frames_2d
         )
