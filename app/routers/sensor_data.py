@@ -145,6 +145,29 @@ def _build_predict_response(result: dict) -> PredictResponse:
     """Build a PredictResponse from _predict_and_buffer result."""
     sign = result.get("sign_entry") or {}
     buf = result["buffer_state"]
+    
+    # 🌟 สร้างลิสต์เปล่ามารอรับข้อมูลที่ผ่านการคลีนแล้ว
+    safe_current_words = []
+    
+    for w in buf.get("current_words", []):
+        # 1. เช็คว่าเป็นอะไร: ถ้าเป็น Dict อยู่แล้วเอามาใช้ได้เลย แต่ถ้าเป็น Object ให้แปลงก่อน
+        if isinstance(w, dict):
+            w_dict = w.copy()
+        elif hasattr(w, "model_dump"):
+            w_dict = w.model_dump()
+        else:
+            w_dict = w.dict()
+            
+        # 2. แก้ปัญหาตัวเลข confidence กลายเป็น String (ต้นเหตุของ Error แรกสุด)
+        conf_val = w_dict.get("confidence", 0.0)
+        try:
+            w_dict["confidence"] = float(conf_val)
+        except (ValueError, TypeError):
+            w_dict["confidence"] = 0.0 # ถ้ามันแปลงเป็นเลขไม่ได้จริงๆ บังคับเป็น 0 ซะเลย
+            
+        # 3. แพ็กใส่ Pydantic Model แบบสวยๆ
+        safe_current_words.append(BufferWordInfo(**w_dict))
+
     return PredictResponse(
         predicted_sign=result["predicted_sign"],
         confidence=result["confidence"],
@@ -153,5 +176,5 @@ def _build_predict_response(result: dict) -> PredictResponse:
         label=sign.get("label"),
         recording=buf["recording"],
         word_count=buf["word_count"],
-        current_words=[BufferWordInfo(**w.dict()) for w in buf["current_words"]],
+        current_words=safe_current_words, # 👈 ใส่ลิสต์ที่เราคลีนเรียบร้อยแล้ว
     )
