@@ -12,8 +12,10 @@ router = APIRouter(
 
 # โครงสร้าง Data ที่ Frontend ต้องส่งมา
 class PredictRequest(BaseModel):
-    model_name: str      # ให้ Frontend ส่งชื่อโมเดลมาด้วย
-    data: List[List[float]] # ข้อมูล Sensor จากถุงมือ
+    # ให้รับ model_name ด้วย จะได้รู้ว่าต้องใช้สมองก้อนไหน (ใส่ default เผื่อไว้ได้)
+    model_name: str = "sign_language_model_v1" 
+    # รับ raw_data เป็น String ก้อนยาวๆ ตาม JSON ที่คุณส่งมา
+    raw_data: str
 
 @router.get("/models")
 async def get_available_models():
@@ -33,7 +35,7 @@ async def predict_gesture(payload: PredictRequest):
         # ส่งให้ PredictionService ทำนาย
         result = prediction_service.predict(
             model_name=payload.model_name,
-            raw_data=payload.data
+            raw_data=payload.raw_data  # 👈 เปลี่ยนตรงนี้เป็น raw_data
         )
         
         if "error" in result:
