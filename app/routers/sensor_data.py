@@ -45,11 +45,7 @@ class PredictResponse(BaseModel):
 # ======================================================
 async def _predict_and_buffer(frames_2d: list, source: str = "api", model_name: str = None) -> dict:
     """Common logic: predict gesture, buffer word, log to DB."""
-    if not PredictionService.is_loaded:
-        raise HTTPException(
-            status_code=503,
-            detail="ML models not loaded. Run 'python -m app.services.train_model' first.",
-        )
+    
 
     if len(frames_2d) < 5:
         raise HTTPException(
