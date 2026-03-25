@@ -52,8 +52,9 @@ async def predict_gesture(payload: PredictRequest):
     # 4. 🌟 โยนทุกอย่างเข้า _predict_and_buffer แล้วรอรับผลลัพธ์ 🌟
     result = await _predict_and_buffer(
         frames_2d=frames_2d, 
-        source=f"device_{payload.device_id}", # แปะชื่อ Device ลง Log
-        model_name=assigned_model             # ส่งชื่อโมเดลไปให้ฟังก์ชัน
+        source=f"device_{payload.device_id}",
+        model_name=assigned_model,
+        device_id=payload.device_id,
     )
     
     # 5. Build response ส่งกลับ!

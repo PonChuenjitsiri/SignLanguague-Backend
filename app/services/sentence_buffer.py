@@ -43,47 +43,56 @@ class SentenceBuffer:
         self.recording_started_at: Optional[datetime] = None
         self._lock = asyncio.Lock()
         self._condition = asyncio.Condition()
-        self._version = 0
+        self._versions: dict[str, int] = {}  # per-device version counter
 
-    async def notify(self):
-        """Async: increment version and wake all WebSocket listeners. Use from async handlers."""
+    def _get_version(self, device_id: str) -> int:
+        return self._versions.get(device_id, 0)
+
+    async def notify(self, device_id: str = "__all__"):
+        """Async: increment version for a specific device and wake listeners."""
         async with self._condition:
-            self._version += 1
+            if device_id == "__all__":
+                # Bump all known devices + global
+                for did in list(self._versions.keys()):
+                    self._versions[did] = self._versions.get(did, 0) + 1
+                self._versions["__all__"] = self._versions.get("__all__", 0) + 1
+            else:
+                self._versions[device_id] = self._versions.get(device_id, 0) + 1
             self._condition.notify_all()
 
-    def _notify_change(self):
+    def _notify_change(self, device_id: str = "__all__"):
         """Sync wrapper: schedule async notify. Used internally by buffer methods."""
         try:
             loop = asyncio.get_running_loop()
             loop.call_soon_threadsafe(
                 asyncio.ensure_future,
-                self.notify()
+                self.notify(device_id)
             )
         except RuntimeError:
             pass
 
-    async def wait_for_change(self, timeout: float = 5.0) -> bool:
-        """Wait for a state change. Returns True if changed, False if timeout."""
-        current = self._version
+    async def wait_for_change(self, device_id: str = "__all__", timeout: float = 5.0) -> bool:
+        """Wait for a state change for a specific device. Returns True if changed, False if timeout."""
+        current = self._get_version(device_id)
         try:
             async with asyncio.timeout(timeout):
                 async with self._condition:
-                    await self._condition.wait_for(lambda: self._version != current)
+                    await self._condition.wait_for(lambda: self._get_version(device_id) != current)
                     return True
         except (asyncio.TimeoutError, TimeoutError):
             return False
 
-    async def start_recording(self):
+    async def start_recording(self, device_id: str = "__all__"):
         """Called when ESP32 sends START_SIGNAL."""
         async with self._lock:
             self.completed_sentence = None
             self.words = []
             self.is_recording = True
             self.recording_started_at = datetime.utcnow()
-            self._notify_change()
+            self._notify_change(device_id)
             print("🎙️ Recording started — waiting for gestures...")
 
-    async def stop_recording(self) -> dict:
+    async def stop_recording(self, device_id: str = "__all__") -> dict:
         """Called when ESP32 sends STOP_SIGNAL. Finalizes the sentence."""
         async with self._lock:
             self.is_recording = False
@@ -98,15 +107,15 @@ class SentenceBuffer:
 
             self.words = []
             self.recording_started_at = None
-            self._notify_change()
+            self._notify_change(device_id)
 
             return self._completed_result()
 
-    async def add_word(self, word: BufferedWord) -> dict:
+    async def add_word(self, word: BufferedWord, device_id: str = "__all__") -> dict:
         """Add a predicted word to the buffer. Returns current buffer state."""
         async with self._lock:
             self.words.append(word)
-            self._notify_change()
+            self._notify_change(device_id)
             return self._get_status()
 
     async def get_sentence(self) -> Optional[dict]:
@@ -131,14 +140,14 @@ class SentenceBuffer:
 
             return None
 
-    async def clear(self):
+    async def clear(self, device_id: str = "__all__"):
         """Clear the buffer manually."""
         async with self._lock:
             self.words = []
             self.completed_sentence = None
             self.is_recording = False
             self.recording_started_at = None
-            self._notify_change()
+            self._notify_change(device_id)
 
     # --------------------------------------------------
     # Sentence builders

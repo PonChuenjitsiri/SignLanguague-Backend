@@ -42,7 +42,7 @@ class PredictResponse(BaseModel):
 # ======================================================
 # Shared: predict → buffer → log
 # ======================================================
-async def _predict_and_buffer(frames_2d: list, source: str = "api", model_name: str = None) -> dict:
+async def _predict_and_buffer(frames_2d: list, source: str = "api", model_name: str = None, device_id: str = "__all__") -> dict:
     """Common logic: predict gesture, buffer word, log to DB."""
 
     if len(frames_2d) < 5:
@@ -88,7 +88,7 @@ async def _predict_and_buffer(frames_2d: list, source: str = "api", model_name: 
         titleEng=sign_entry.get("titleEng") if sign_entry else None,
         label=sign_entry.get("label") if sign_entry else None,
     )
-    buffer_state = await sentence_buffer.add_word(word)
+    buffer_state = await sentence_buffer.add_word(word, device_id=device_id)
 
     # Log prediction
     db = get_database()

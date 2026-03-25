@@ -126,7 +126,7 @@ async def heartbeat(request: HeartbeatRequest = HeartbeatRequest()):
         "left_battery": calc_battery(request.left_voltage)
     }
     
-    await sentence_buffer.notify()  # trigger WS update immediately
+    await sentence_buffer.notify(request.device_id)  # trigger WS update for this device only
 
     return HeartbeatResponse(
         status="ok",
@@ -202,7 +202,7 @@ async def calibrate_start(request: CalibrateStartRequest = CalibrateStartRequest
         "started_at": now,
         "updated_at": now,
     }
-    await sentence_buffer.notify()  # trigger WS update immediately
+    await sentence_buffer.notify(request.device_id)  # trigger WS update for this device only
 
     return _build_calibrate_response(request.device_id)
 
@@ -243,7 +243,7 @@ async def calibrate_update(request: CalibrateUpdateRequest):
     if request.hand is not None:
         state["hand"] = request.hand
 
-    await sentence_buffer.notify()  # trigger WS update immediately
+    await sentence_buffer.notify(request.device_id)  # trigger WS update for this device only
 
     return _build_calibrate_response(request.device_id)
 
@@ -296,7 +296,7 @@ async def gesture_start(request: GestureRequest = GestureRequest()):
     a sign language gesture. Activates sentence buffer.
     """
     _gesture_state[request.device_id] = True
-    await sentence_buffer.start_recording()
+    await sentence_buffer.start_recording(request.device_id)
 
     return {
         "message": "Gesture recording started",
@@ -313,7 +313,7 @@ async def gesture_stop(request: GestureRequest = GestureRequest()):
     ESP32 calls this when no data for 5s (timeout) or button press.
     """
     _gesture_state[request.device_id] = False
-    result = await sentence_buffer.stop_recording()
+    result = await sentence_buffer.stop_recording(request.device_id)
 
     return {
         "message": "Gesture recording stopped — sentence finalized",
@@ -373,7 +373,7 @@ async def _send_ws_state(websocket: WebSocket, device_id: str, timeout: int):
             _calibration_state.pop(device_id, None)
             _calibrated_hands.pop(device_id, None)
             _battery_info.pop(device_id, None)
-            await sentence_buffer.clear()
+            await sentence_buffer.clear(device_id)
             online = False
 
     # --- State ---
@@ -467,7 +467,7 @@ async def ws_unified(websocket: WebSocket, device_id: str = "default"):
         while True:
             # Block until an API call triggers a state change
             # Timeout every 30s to also detect offline (no heartbeat = no event)
-            await sentence_buffer.wait_for_change(timeout=30.0)
+            await sentence_buffer.wait_for_change(device_id=device_id, timeout=30.0)
             await _send_ws_state(websocket, device_id, timeout)
     except WebSocketDisconnect:
         pass
