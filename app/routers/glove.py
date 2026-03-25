@@ -465,13 +465,9 @@ async def ws_unified(websocket: WebSocket, device_id: str = "default"):
         await _send_ws_state(websocket, device_id, timeout)
 
         while True:
-            # Block until an API call triggers a state change (pure event-driven)
-            changed = await sentence_buffer.wait_for_change(timeout=30.0)
-            if not changed:
-                # Send keepalive ping to detect stale connections
-                await websocket.send_json({"type": "ping"})
-                continue
-
+            # Block until an API call triggers a state change
+            # Timeout every 30s to also detect offline (no heartbeat = no event)
+            await sentence_buffer.wait_for_change(timeout=30.0)
             await _send_ws_state(websocket, device_id, timeout)
     except WebSocketDisconnect:
         pass

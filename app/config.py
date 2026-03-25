@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     NUM_FEATURES: int = 22
 
     # Glove heartbeat
-    GLOVE_HEARTBEAT_TIMEOUT: int = 10  # seconds before glove is considered offline
+    GLOVE_HEARTBEAT_TIMEOUT: int = 180  # seconds (3 min) before glove is considered offline
 
     # ==========================================
     # เพิ่ม MinIO Config ตรงนี้ให้ตรงกับ .env
