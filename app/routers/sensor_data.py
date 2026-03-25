@@ -42,7 +42,7 @@ class PredictResponse(BaseModel):
 # ======================================================
 # Shared: predict → buffer → log
 # ======================================================
-async def _predict_and_buffer(frames_2d: list, source: str = "api") -> dict:
+async def _predict_and_buffer(frames_2d: list, source: str = "api", model_name: str = None) -> dict:
     """Common logic: predict gesture, buffer word, log to DB."""
     if not PredictionService.is_loaded:
         raise HTTPException(
@@ -57,7 +57,7 @@ async def _predict_and_buffer(frames_2d: list, source: str = "api") -> dict:
         )
 
     try:
-        predicted_sign, ensemble_conf, cnn_conf, xgb_conf = PredictionService.predict(frames_2d)
+        predicted_sign, ensemble_conf, cnn_conf, xgb_conf = PredictionService.predict(model_name=model_name, frames_2d=frames_2d)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
