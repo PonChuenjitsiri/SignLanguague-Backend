@@ -52,11 +52,21 @@ async def _predict_and_buffer(frames_2d: list, source: str = "api", model_name: 
         )
 
     try:
-        # 🌟 ลบ if-else ออก ใช้ PredictionService ตัวพิมพ์ใหญ่แบบดั้งเดิมตัวเดียวจบ! 🌟
-        predicted_sign, ensemble_conf, cnn_conf, xgb_conf = PredictionService().predict(
+        # 🌟 รับค่ามาก้อนเดียวก่อน อย่าเพิ่ง Unpack (แยกตัวแปร) เพื่อกันปัญหาได้ชื่อ Key มาแทน
+        predict_output = PredictionService().predict(
             model_name=model_name, 
             raw_data=frames_2d
         )
+
+        # 🌟 เช็คว่าถ้าออกมาเป็น Dictionary ให้ใช้ .get() เพื่อดึง "ค่า (Value)" จริงๆ ออกมา
+        if isinstance(predict_output, dict):
+            predicted_sign = predict_output.get("prediction") or predict_output.get("predicted_sign")
+            ensemble_conf = float(predict_output.get("confidence", 0.0))
+            cnn_conf = float(predict_output.get("cnn_conf", 0.0))
+            xgb_conf = float(predict_output.get("xgb_conf", 0.0))
+        else:
+            # แต่ถ้าคุณแก้ให้มัน Return เป็น Tuple (ค่าเรียงกัน 4 ตัว) ไปแล้ว ก็ให้ Unpack ได้เลย
+            predicted_sign, ensemble_conf, cnn_conf, xgb_conf = predict_output
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
