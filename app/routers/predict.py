@@ -4,6 +4,7 @@ from typing import List
 
 from app.services.model_manager import model_manager
 from app.services.prediction_service import prediction_service
+from app.services.prediction_stream import parse_raw_frames
 
 router = APIRouter(
     prefix="/predict",
@@ -27,15 +28,23 @@ async def get_available_models():
 async def predict_gesture(payload: PredictRequest):
     """ทำนายท่าทางภาษามือ"""
     try:
-        # เช็คก่อนว่าโมเดลนี้มีอยู่จริงไหม
+        # 1. เช็คก่อนว่าโมเดลนี้มีอยู่จริงไหม
         available_models = model_manager.list_available_models()
         if payload.model_name not in available_models:
             raise HTTPException(status_code=404, detail=f"Model '{payload.model_name}' not found.")
 
-        # ส่งให้ PredictionService ทำนาย
+        # 2. แปลง String ดิบเป็น List 2D ด้วยฟังก์ชันของคุณ
+        frames_2d = parse_raw_frames(payload.raw_data)
+        if not frames_2d:
+            raise HTTPException(
+                status_code=400, 
+                detail="No valid frames found. Each line needs exactly 22 numeric values."
+            )
+
+        # 3. ส่งข้อมูลที่สะอาดแล้วให้ PredictionService ทำนาย
         result = prediction_service.predict(
             model_name=payload.model_name,
-            raw_data=payload.raw_data  # 👈 เปลี่ยนตรงนี้เป็น raw_data
+            frames=frames_2d  # 👈 เปลี่ยนจาก raw_data เป็น frames ที่ parse แล้ว
         )
         
         if "error" in result:
@@ -43,5 +52,7 @@ async def predict_gesture(payload: PredictRequest):
 
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
