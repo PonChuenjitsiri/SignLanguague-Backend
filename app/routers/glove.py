@@ -126,7 +126,7 @@ async def heartbeat(request: HeartbeatRequest = HeartbeatRequest()):
         "left_battery": calc_battery(request.left_voltage)
     }
     
-    sentence_buffer._notify_change()  # trigger WS update
+    await sentence_buffer.notify()  # trigger WS update immediately
 
     return HeartbeatResponse(
         status="ok",
@@ -202,7 +202,7 @@ async def calibrate_start(request: CalibrateStartRequest = CalibrateStartRequest
         "started_at": now,
         "updated_at": now,
     }
-    sentence_buffer._notify_change()  # trigger WS update
+    await sentence_buffer.notify()  # trigger WS update immediately
 
     return _build_calibrate_response(request.device_id)
 
@@ -243,7 +243,7 @@ async def calibrate_update(request: CalibrateUpdateRequest):
     if request.hand is not None:
         state["hand"] = request.hand
 
-    sentence_buffer._notify_change()  # trigger WS update
+    await sentence_buffer.notify()  # trigger WS update immediately
 
     return _build_calibrate_response(request.device_id)
 
@@ -357,6 +357,72 @@ async def receive_test_sensors(data: TestSensorData):
 # ══════════════════════════════════════════════════════
 #  4. UNIFIED WEBSOCKET — All state in one connection
 # ══════════════════════════════════════════════════════
+async def _send_ws_state(websocket: WebSocket, device_id: str, timeout: int):
+    """Build current state and push it to the WebSocket client."""
+    # --- Status ---
+    last_hb = _heartbeats.get(device_id)
+    online = False
+    if last_hb is not None:
+        elapsed = (datetime.now(timezone.utc) - last_hb).total_seconds()
+        online = elapsed <= timeout
+
+        # Clear device data if offline for more than 3 hours (10800 seconds)
+        if elapsed > 10800:
+            _heartbeats.pop(device_id, None)
+            _gesture_state.pop(device_id, None)
+            _calibration_state.pop(device_id, None)
+            _calibrated_hands.pop(device_id, None)
+            _battery_info.pop(device_id, None)
+            await sentence_buffer.clear()
+            online = False
+
+    # --- State ---
+    cal_state = _calibration_state.get(device_id)
+    calibrating = cal_state["calibrating"] if cal_state else False
+    gesture_active = _gesture_state.get(device_id, False)
+
+    if calibrating:
+        state = "calibrate"
+    elif gesture_active or sentence_buffer.is_recording:
+        state = "gesture"
+    else:
+        state = "idle"
+
+    # --- Calibration details ---
+    hand = cal_state.get("hand", "right") if cal_state else "right"
+    cal_round = str(cal_state.get("round", 0)) if cal_state else "0"
+    cal_step = cal_state.get("step", "idle") if cal_state else "idle"
+    if cal_step == "done":
+        cal_round = "done"
+
+    # --- Sentence ---
+    ws_sentence = await sentence_buffer.get_ws_sentence()
+
+    # --- Calibration flags ---
+    cal_hands = _calibrated_hands.get(device_id, {"left": False, "right": False})
+
+    # --- Battery ---
+    batt_info = _battery_info.get(device_id, {})
+
+    await websocket.send_json({
+        "status": "online" if online else "offline",
+        "state": state,
+        "hand": hand,
+        "round": cal_round,
+        "thai_word": ws_sentence["thai_word"],
+        "eng_word": ws_sentence["eng_word"],
+        "recording": ws_sentence["recording"],
+        "complete": ws_sentence["complete"],
+        "word_count": ws_sentence["word_count"],
+        "calibrate_left": cal_hands.get("left", False),
+        "calibrate_right": cal_hands.get("right", False),
+        "right_voltage": batt_info.get("right_voltage", 0.0),
+        "right_battery": batt_info.get("right_battery", 0.0),
+        "left_voltage": batt_info.get("left_voltage", 0.0),
+        "left_battery": batt_info.get("left_battery", 0.0),
+    })
+
+
 @router.websocket("/ws")
 async def ws_unified(websocket: WebSocket, device_id: str = "default"):
     """
@@ -395,72 +461,17 @@ async def ws_unified(websocket: WebSocket, device_id: str = "default"):
     timeout = settings.GLOVE_HEARTBEAT_TIMEOUT
 
     try:
+        # Send initial state immediately on connect
+        await _send_ws_state(websocket, device_id, timeout)
+
         while True:
-            # Wait for any state change (or timeout for periodic push)
-            await sentence_buffer.wait_for_change(timeout=3.0)
+            # Block until an API call triggers a state change (pure event-driven)
+            changed = await sentence_buffer.wait_for_change(timeout=30.0)
+            if not changed:
+                # Send keepalive ping to detect stale connections
+                await websocket.send_json({"type": "ping"})
+                continue
 
-            # --- Status ---
-            last_hb = _heartbeats.get(device_id)
-            online = False
-            if last_hb is not None:
-                elapsed = (datetime.now(timezone.utc) - last_hb).total_seconds()
-                online = elapsed <= timeout
-
-                # Clear device data if offline for more than 3 hours (10800 seconds)
-                if elapsed > 10800:
-                    _heartbeats.pop(device_id, None)
-                    _gesture_state.pop(device_id, None)
-                    _calibration_state.pop(device_id, None)
-                    _calibrated_hands.pop(device_id, None)
-                    _battery_info.pop(device_id, None)
-                    await sentence_buffer.clear()
-                    online = False
-                    last_hb = None
-
-            # --- State ---
-            cal_state = _calibration_state.get(device_id)
-            calibrating = cal_state["calibrating"] if cal_state else False
-            gesture_active = _gesture_state.get(device_id, False)
-
-            if calibrating:
-                state = "calibrate"
-            elif gesture_active or sentence_buffer.is_recording:
-                state = "gesture"
-            else:
-                state = "idle"
-
-            # --- Calibration details ---
-            hand = cal_state.get("hand", "right") if cal_state else "right"
-            cal_round = str(cal_state.get("round", 0)) if cal_state else "0"
-            cal_step = cal_state.get("step", "idle") if cal_state else "idle"
-            if cal_step == "done":
-                cal_round = "done"
-
-            # --- Sentence ---
-            ws_sentence = await sentence_buffer.get_ws_sentence()
-
-            # --- Calibration flags ---
-            cal_hands = _calibrated_hands.get(device_id, {"left": False, "right": False})
-
-            # --- Battery ---
-            batt_info = _battery_info.get(device_id, {})
-
-            await websocket.send_json({
-                "status": "online" if online else "offline",
-                "state": state,
-                "hand": hand,
-                "round": cal_round,
-                "thai_word": ws_sentence["thai_word"],
-                "eng_word": ws_sentence["eng_word"],
-                "recording": ws_sentence["recording"],
-                "complete": ws_sentence["complete"],
-                "word_count": ws_sentence["word_count"],
-                "calibrate_left": cal_hands.get("left", False),
-                "calibrate_right": cal_hands.get("right", False),
-                "right_voltage": batt_info.get("right_voltage", 0.0),
-                "right_battery": batt_info.get("right_battery", 0.0),
-                "left_voltage": batt_info.get("left_voltage", 0.0),
-                "left_battery": batt_info.get("left_battery", 0.0),
-            })
+            await _send_ws_state(websocket, device_id, timeout)
     except WebSocketDisconnect:
         pass

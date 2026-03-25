@@ -42,19 +42,35 @@ class SentenceBuffer:
         self.completed_sentence: Optional[list[BufferedWord]] = None
         self.recording_started_at: Optional[datetime] = None
         self._lock = asyncio.Lock()
-        self._change_event = asyncio.Event()
+        self._condition = asyncio.Condition()
+        self._version = 0
+
+    async def notify(self):
+        """Async: increment version and wake all WebSocket listeners. Use from async handlers."""
+        async with self._condition:
+            self._version += 1
+            self._condition.notify_all()
 
     def _notify_change(self):
-        """Signal that state has changed (for WebSocket listeners)."""
-        self._change_event.set()
-        self._change_event = asyncio.Event()  # reset for next wait
+        """Sync wrapper: schedule async notify. Used internally by buffer methods."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_soon_threadsafe(
+                asyncio.ensure_future,
+                self.notify()
+            )
+        except RuntimeError:
+            pass
 
     async def wait_for_change(self, timeout: float = 5.0) -> bool:
         """Wait for a state change. Returns True if changed, False if timeout."""
+        current = self._version
         try:
-            await asyncio.wait_for(self._change_event.wait(), timeout=timeout)
-            return True
-        except asyncio.TimeoutError:
+            async with asyncio.timeout(timeout):
+                async with self._condition:
+                    await self._condition.wait_for(lambda: self._version != current)
+                    return True
+        except (asyncio.TimeoutError, TimeoutError):
             return False
 
     async def start_recording(self):
