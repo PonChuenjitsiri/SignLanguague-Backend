@@ -58,3 +58,4 @@ async def predict_gesture(payload: PredictRequest):
     
     # 5. Build response ส่งกลับ!
     return _build_predict_response(result)
+    # return result

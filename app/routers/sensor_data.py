@@ -153,5 +153,5 @@ def _build_predict_response(result: dict) -> PredictResponse:
         label=sign.get("label"),
         recording=buf["recording"],
         word_count=buf["word_count"],
-        current_words=[BufferWordInfo(**w) for w in buf["current_words"]],
+        current_words=[BufferWordInfo(**w.dict()) for w in buf["current_words"]],
     )
