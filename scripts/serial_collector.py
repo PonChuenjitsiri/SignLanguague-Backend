@@ -155,7 +155,7 @@ def main():
         print(f"❌ Could not open port {port_name}: {e}")
         return
 
-    is_recording = False
+    is_receiving_data = False
     current_data = []
     
     try:
@@ -165,40 +165,44 @@ def main():
                 if not line:
                     continue
                     
-                # Print all system/debug messages from ESP32
+                # 1. Print all system/debug messages from ESP32
                 if line.startswith("SYS:"):
                     sys_msg = line[4:].strip()
-                    print(f"ESP32: {sys_msg}")
+                    # print(f"ESP32: {sys_msg}") # (Optional) ปิดคอมเมนต์ถ้าอยากเห็น Log ESP32 ทั้งหมด
+                    
                     if "GESTURE START" in sys_msg:
-                        print(f"▶️ RECORDING STARTED for '{word}'...")
+                        print(f"▶️ RECORDING STARTED for '{word}'... (Do your gesture)")
                     elif "START_DATA" in sys_msg:
-                        # This is the actual trigger that frames are about to be sent over Serial
-                        is_recording = True
+                        # เริ่มรับก้อนข้อมูล
+                        is_receiving_data = True
                         current_data = []
                     elif "END_DATA" in sys_msg:
+                        # รับข้อมูลเสร็จสิ้น
                         if current_data:
                             print(f"\n⏹️ RECORDING STOPPED. Received {len(current_data)} frames.")
                             save_gesture(name, word, current_data)
                         else:
                             print("\n⚠️ Recording stopped but no valid frames received.")
-                        is_recording = False
+                        is_receiving_data = False
                         current_data = []
+                    elif "DISCARD" in sys_msg:
+                        print("\n⚠️ DISCARDED: Gesture was too short (less than 5 frames).")
                     continue
                     
-                # Handle control commands from Left Hand
+                # 2. Handle control commands from Left Hand
                 if line == "DELETE":
-                    if not is_recording:
-                        delete_latest_gesture(name, word)
+                    print("\n🗑️ DELETE SIGNAL RECEIVED!")
+                    delete_latest_gesture(name, word)
+                    
                 elif line == "CANCEL":
-                    if is_recording:
-                        print("🚫 RECORDING CANCELLED BY USER.")
-                        is_recording = False
-                        current_data = []
+                    print("\n🚫 CANCEL SIGNAL RECEIVED! Cleared ESP32 memory. Ready for new attempt.")
+                    is_receiving_data = False
+                    current_data = []
                 
-                # Process data frames (any line containing numbers)
-                elif is_recording and (line[0].isdigit() or line.startswith("S ") or line.startswith("-")):
+                # 3. Process data frames (any line starting with a number, 'S', or '-')
+                elif is_receiving_data and (line[0].isdigit() or line.startswith("S ") or line.startswith("-")):
                     current_data.append(line)
-                    print(f"  Received frame {len(current_data)}", end="\r")
+                    print(f"  📥 Downloading frame {len(current_data)}", end="\r")
                     
             time.sleep(0.01) # Small sleep to prevent 100% CPU
             
