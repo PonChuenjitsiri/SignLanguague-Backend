@@ -45,7 +45,6 @@ class PredictResponse(BaseModel):
 # ======================================================
 async def _predict_and_buffer(frames_2d: list, source: str = "api", model_name: str = None) -> dict:
     """Common logic: predict gesture, buffer word, log to DB."""
-    
 
     if len(frames_2d) < 5:
         raise HTTPException(
@@ -54,31 +53,18 @@ async def _predict_and_buffer(frames_2d: list, source: str = "api", model_name: 
         )
 
     try:
-        # 🌟 แยก Logic การทำนายเป็น 2 กรณี 🌟
-        if model_name:
-            # 1. กรณีมาจาก Device (มีการระบุชื่อโมเดล)
-            # ใช้ prediction_service ตัวพิมพ์เล็ก (ที่น่าจะคืนค่าเป็น dict)
-            pred_result = prediction_service.predict(model_name=model_name, raw_data=frames_2d)
-            
-            if "error" in pred_result:
-                raise ValueError(pred_result["error"])
-                
-            predicted_sign = pred_result.get("predicted_sign") or pred_result.get("prediction") or pred_result.get("sign")
-            ensemble_conf = pred_result.get("confidence", 0.0)
-            cnn_conf = pred_result.get("cnn_conf", 0.0)
-            xgb_conf = pred_result.get("xgb_conf", 0.0)
-            
-        else:
-            # 2. กรณีมาจาก /predict ปกติ (ไม่ระบุโมเดล)
-            # ใช้ PredictionService ตัวพิมพ์ใหญ่แบบดั้งเดิม
-            predicted_sign, ensemble_conf, cnn_conf, xgb_conf = PredictionService.predict(frames_2d)
+        # 🌟 ลบ if-else ออก ใช้ PredictionService ตัวพิมพ์ใหญ่แบบดั้งเดิมตัวเดียวจบ! 🌟
+        predicted_sign, ensemble_conf, cnn_conf, xgb_conf = PredictionService.predict(
+            model_name=model_name, 
+            raw_data=frames_2d
+        )
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        # 🚨 ดัก Error อื่นๆ (เช่น TypeError, KeyError) จะได้รู้ว่าพังเพราะอะไร
+        # 🚨 ดัก Error อื่นๆ
         print(f"🔥 DEBUG PREDICT ERROR: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Prediction System Error: {str(e)}")
 
@@ -104,7 +90,7 @@ async def _predict_and_buffer(frames_2d: list, source: str = "api", model_name: 
         "xgboost_confidence": xgb_conf,
         "num_frames": len(frames_2d),
         "source": source,
-        "model_used": model_name or "default_model", # แปะชื่อโมเดลลง DB
+        "model_used": model_name or "default_model", 
         "created_at": datetime.utcnow(),
     })
 
