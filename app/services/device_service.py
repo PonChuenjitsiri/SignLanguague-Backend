@@ -1,6 +1,6 @@
 from datetime import datetime
 from app.database import get_database
-from app.services import model_manager  # ดึงมาเพื่อเช็คชื่อโมเดล
+from app.services.model_manager import model_manager  # ดึงมาเพื่อเช็คชื่อโมเดล
 
 class DeviceService:
     """Service layer for device CRUD operations."""

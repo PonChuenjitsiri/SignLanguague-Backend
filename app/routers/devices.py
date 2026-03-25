@@ -1,3 +1,5 @@
+import traceback
+
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional, List
 
@@ -36,6 +38,11 @@ async def create_device(device_data: DeviceCreate):
     except ValueError as e:
         # ดัก Error กรณีส่งชื่อ model ผิด
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # 🚨 ดัก Error ทุกอย่างที่หลุดรอดมา และโชว์ให้เราเห็น!
+        error_detail = traceback.format_exc()
+        print("====== ERROR LOG ======\n", error_detail) # ปริ้นท์ลง Terminal แบบละเอียด
+        raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
 
 
 @router.put("/{device_id}", response_model=DeviceResponse)
