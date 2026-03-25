@@ -16,19 +16,27 @@ class DeviceService:
     async def create(data: dict):
         collection = DeviceService._get_collection()
         
-        # 1. เช็คว่า Model มีอยู่จริงไหมก่อนบันทึก
+        device_id = data.get("device_id")
+
+        # 1. เช็คก่อนว่ามี Device ID นี้อยู่ในระบบแล้วหรือยัง?
+        existing_device = await collection.find_one({"device_id": device_id})
+        if existing_device:
+            # ถ้ามีอยู่แล้วให้เด้ง Error กลับไปเลย
+            raise ValueError(f"Device ID '{device_id}' already exists. Please use update instead.")
+
+        # 2. เช็คว่า Model มีอยู่จริงไหมก่อนบันทึก
         available_models = model_manager.list_available_models()
         if data.get("model_name") not in available_models:
             raise ValueError(f"Model '{data.get('model_name')}' not found.")
 
-        # 2. เพิ่มเวลาอัปเดต
+        # 3. เพิ่มเวลาอัปเดต
         data["updated_at"] = datetime.utcnow()
         
-        # 3. บันทึกลง Database (ใช้ copy() เพื่อไม่ให้ _id ติดไปใน dict ต้นฉบับ)
+        # 4. บันทึกลง Database (ใช้ copy() เพื่อไม่ให้ _id ติดไปใน dict ต้นฉบับ)
         insert_data = data.copy()
         await collection.insert_one(insert_data)
         
-        # 4. คืนค่ากลับไปให้ Router เพื่อแปลงเป็น Response Model
+        # 5. คืนค่ากลับไปให้ Router เพื่อแปลงเป็น Response Model
         return data
 
     @staticmethod
