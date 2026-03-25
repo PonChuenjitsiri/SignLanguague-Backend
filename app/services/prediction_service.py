@@ -117,14 +117,18 @@ class PredictionService:
         ensemble_probs = (probs_cnn + probs_xgb) / 2.0
         predicted_idx = int(np.argmax(ensemble_probs))
         confidence = float(ensemble_probs[predicted_idx])
+        cnn_conf = float(probs_cnn[predicted_idx])
+        xgb_conf = float(probs_xgb[predicted_idx])
 
         # 6. แปลง Index เป็นชื่อท่าทาง
         predicted_label = models["labels_map"][str(predicted_idx)]
 
         return {
-            "model_used": model_name,
+            # "model_used": model_name,
             "prediction": predicted_label,
-            "confidence": round(confidence * 100, 2)
+            "confidence": round(confidence * 100, 2),
+            "cnn_confidence": round(cnn_conf * 100, 2),
+            "xgb_confidence": round(xgb_conf * 100, 2)
         }
 
 # สร้าง Instance ไว้เรียกใช้

@@ -7,7 +7,6 @@ from app.schemas.sensor_data import (
     GesturePredictRequest,
     RawPredictRequest,
 )
-from app.services import prediction_service
 from app.services.prediction_service import PredictionService
 from app.services.sign_language_service import SignLanguageService
 from app.services.sentence_buffer import sentence_buffer, BufferedWord
