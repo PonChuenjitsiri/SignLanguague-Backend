@@ -4,7 +4,7 @@ from datetime import datetime
 
 class DeviceBase(BaseModel):
     device_id: str = Field(..., description="รหัสอุปกรณ์ เช่น ESP32-MAC-ADDRESS")
-    model_name: str = Field(..., description="ชื่อ AI Model")
+    model_name: Optional[str] = Field(None, description="ชื่อ AI Model (ถ้าไม่ส่งมา จะใช้เวอร์ชันล่าสุดอัตโนมัติ)")
 
 class DeviceCreate(DeviceBase):
     pass

@@ -21,22 +21,31 @@ class DeviceService:
         # 1. เช็คก่อนว่ามี Device ID นี้อยู่ในระบบแล้วหรือยัง?
         existing_device = await collection.find_one({"device_id": device_id})
         if existing_device:
-            # ถ้ามีอยู่แล้วให้เด้ง Error กลับไปเลย
             raise ValueError(f"Device ID '{device_id}' already exists. Please use update instead.")
 
-        # 2. เช็คว่า Model มีอยู่จริงไหมก่อนบันทึก
+        # 2. ดึงรายชื่อโมเดลทั้งหมดที่มีในระบบ
         available_models = model_manager.list_available_models()
-        if data.get("model_name") not in available_models:
-            raise ValueError(f"Model '{data.get('model_name')}' not found.")
+        if not available_models:
+            # ดักไว้เผื่อระบบยังไม่มีโมเดลเลย
+            raise ValueError("No AI models available in the system yet. Please upload a model first.")
 
-        # 3. เพิ่มเวลาอัปเดต
+        # 3. 🌟 จัดการเรื่อง Default Model 🌟
+        if not data.get("model_name"):
+            # ถ้าไม่ส่งชื่อโมเดลมา ให้เรียงลำดับชื่อแล้วเอาตัวสุดท้าย (ล่าสุด) มาใช้
+            latest_model = sorted(available_models)[-1]
+            data["model_name"] = latest_model
+        else:
+            # ถ้าส่งมา ต้องเช็คว่ามีอยู่จริงไหม
+            if data["model_name"] not in available_models:
+                raise ValueError(f"Model '{data['model_name']}' not found.")
+
+        # 4. เพิ่มเวลาอัปเดต
         data["updated_at"] = datetime.utcnow()
         
-        # 4. บันทึกลง Database (ใช้ copy() เพื่อไม่ให้ _id ติดไปใน dict ต้นฉบับ)
+        # 5. บันทึกลง Database
         insert_data = data.copy()
         await collection.insert_one(insert_data)
         
-        # 5. คืนค่ากลับไปให้ Router เพื่อแปลงเป็น Response Model
         return data
 
     @staticmethod
