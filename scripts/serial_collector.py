@@ -10,7 +10,7 @@ from datetime import datetime
 # Config
 # ==========================================
 BAUD_RATE = 115200
-DATA_DIR = "dataset"
+DATA_DIR = "app/dataset"
 
 def get_latest_file(directory):
     """Find the most recently created file in a directory."""
