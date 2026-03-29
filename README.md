@@ -1,38 +1,60 @@
-# Smart Glove Backend
+# Smart Glove Backend 🧤
 
-FastAPI + MongoDB backend for the Smart Glove sign language recognition system.
-Recognizes Thai Sign Language gestures from ESP32 sensor data using a CNN-LSTM + XGBoost ensemble model.
+FastAPI + MongoDB backend สำหรับระบบแปลภาษามือไทย (Thai Sign Language Recognition)  
+รับข้อมูล sensor จากถุงมือ ESP32 → ทำนายท่าทางด้วย CNN-LSTM + XGBoost ensemble → สร้างประโยค → ส่งผลลัพธ์ผ่าน WebSocket แบบ real-time
 
-## Features
+## สถาปัตยกรรมระบบ
 
-- **Gesture Prediction** — CNN-LSTM + XGBoost ensemble (soft voting) for sign language recognition
-- **Unified WebSocket** — Single WebSocket แสดงสถานะทั้งหมด (online, calibrate, gesture, sentence)
-- **Glove Calibration** — Calibration flow (แบ/กำมือ × 5 รอบ ทั้งซ้ายและขวา)
-- **Gesture Lifecycle** — Start/stop gesture recording + sentence buffering
-- **Sign Language Dictionary** — CRUD API for 50 sign language entries (Thai/English)
-- **Data Collection** — Collect training data from ESP32 via serial port
-- **Media Upload** — Upload sign language images & gesture demo videos to MinIO object storage
-- **MongoDB + Docker** — Containerized database with Mongo Express UI
+```
+ESP32 Gloves (L+R)          Backend (FastAPI)              Frontend (Flutter)
+       │                          │                              │
+   Heartbeat ──── POST ─────────►│                              │
+   Calibrate ──── POST ─────────►│                              │
+   Gesture ────── POST ─────────►│     ◄──── WebSocket ─────────│
+   Sensor Data ── POST ─────────►│── push real-time state ─────►│
+                                  │                              │
+                            ┌─────┴─────┐                        
+                            │  Services  │                        
+                            ├────────────┤                        
+                            │ CNN-LSTM   │  ← PyTorch             
+                            │ XGBoost    │  ← Ensemble (50:50)    
+                            │ MinIO      │  ← Model Storage       
+                            │ MongoDB    │  ← Data + Logs         
+                            └────────────┘                        
+```
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| API Framework | FastAPI + Uvicorn |
+| Database | MongoDB (Motor async driver) |
+| ML Inference | PyTorch (CNN-LSTM) + XGBoost |
+| Object Storage | MinIO (models, images, videos) |
+| Package Manager | [uv](https://docs.astral.sh/uv/) |
+| Containerization | Docker Compose |
+
+---
 
 ## Quick Start
 
-### 1. Prerequisites
+### Prerequisites
 
-- [Python 3.11+](https://www.python.org/)
-- [uv](https://docs.astral.sh/uv/) — Python package manager
-- [Docker](https://www.docker.com/) — for MongoDB & MinIO
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/)
+- [Docker](https://www.docker.com/)
 
-### 2. Setup
+### Setup
 
 ```bash
-# Clone the repository
+# Clone
 git clone https://github.com/PonChuenjitsiri/SignLanguague-Backend.git
 cd SignLanguague-Backend
 
 # Install dependencies
 uv sync
 
-# Start MongoDB + MinIO (Docker)
+# Start infrastructure (MongoDB + MinIO)
 docker compose up -d
 
 # Configure environment
@@ -41,82 +63,140 @@ copy .env.example .env
 # Seed sign language dictionary (50 words from Excel)
 uv run python scripts/seed_sign_languages.py
 
-# Train the model (requires dataset in app/dataset/)
-uv run python -m app.services.train_model
+# Train model (ต้องมี dataset ใน app/dataset/)
+uv run python -m app.services.train_model --model-name v1
 
-# Run the server
+# Run server
 uv run uvicorn app.main:app --reload
 ```
 
-### 3. Access
+### Access Points
 
-- **API Docs (Swagger):** http://127.0.0.1:8000/docs
-- **Mongo Express UI:** http://localhost:8081
-- **MinIO Console:** http://localhost:9001
+| Service | URL |
+|---------|-----|
+| API Docs (Swagger) | http://127.0.0.1:8000/docs |
+| Mongo Express | http://localhost:8081 |
+| MinIO Console | http://localhost:9001 |
 
 ---
 
-## API Endpoints
+## Core Features
 
-### Glove — Connection & Control (`/api/glove`)
+### 1. Glove Communication (`/api/glove`)
 
-| Method | Endpoint | ใช้โดย | Description |
-|--------|----------|--------|-------------|
-| POST | `/heartbeat` | ESP32 | ส่ง heartbeat ทุก 5 วิ |
-| GET | `/status` | Frontend | เช็คถุงมือ online/offline |
-| GET | `/status/all` | Frontend | ดูสถานะถุงมือทุกตัว |
-| POST | `/calibrate/start` | ESP32 | เริ่ม calibration (ระบุ `hand: left/right`) |
-| POST | `/calibrate/update` | ESP32 | อัพเดท step (open/close/done, round 1-5) |
-| GET | `/calibrate/status` | Frontend | ดูคำสั่ง calibration (ไทย/อังกฤษ) |
-| POST | `/gesture/start` | ESP32 | เริ่มบันทึกท่ามือ |
-| POST | `/gesture/stop` | ESP32 | หยุดบันทึก (5 วิ timeout) |
-| GET | `/gesture/status` | Frontend | เช็คสถานะ gesture active |
-| **WS** | **`/ws`** | **Frontend** | 🔌 **Unified WebSocket — ทุกสถานะในหน้าเดียว** |
+จัดการ lifecycle ทั้งหมดของถุงมือ ESP32
 
-### Sensor Data & Prediction (`/api/sensor-data`)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/heartbeat` | POST | ESP32 ส่ง heartbeat ทุก 5 วิ + แรงดัน battery |
+| `/status` | GET | เช็คถุงมือ online/offline |
+| `/status/all` | GET | ดูสถานะถุงมือทุกตัว |
+| `/calibrate/start` | POST | เริ่ม calibration (ระบุ `hand: left/right`) |
+| `/calibrate/update` | POST | อัพเดท step — open/close/done × 5 รอบ |
+| `/calibrate/status` | GET | ดูสถานะ calibration ปัจจุบัน |
+| `/gesture/start` | POST | เริ่มบันทึกท่ามือ |
+| `/gesture/stop` | POST | หยุดบันทึก |
+| `/gesture/status` | GET | เช็คสถานะ gesture |
+| **`/ws`** | **WebSocket** | **🔌 Unified WebSocket — ทุกสถานะแบบ real-time** |
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/predict` | รับ gesture (JSON frames) → predict → buffer |
-| POST | `/predict/raw` | รับ raw text จาก ESP32 (`S ... E` format) → predict → buffer |
+### 2. Prediction (`/predict`)
 
-### Sign Languages — CRUD (`/api/sign-languages`)
+ระบบทำนายท่าทาง — รับ raw sensor data จาก ESP32, ทำนาย, บันทึกคำลง sentence buffer
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | ดึงรายการท่าภาษามือทั้งหมด (`?category=` filter) |
-| GET | `/{id}` | ดึงข้อมูลท่าตาม ID |
-| POST | `/` | เพิ่มท่าภาษามือใหม่ |
-| PUT | `/{id}` | แก้ไขข้อมูลท่า |
-| DELETE | `/{id}` | ลบท่า |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | POST | ทำนายจาก raw data โดยใช้โมเดลที่ผูกกับ device |
+| `/models` | GET | ดูรายชื่อโมเดลทั้งหมดที่มีในระบบ |
 
-### Upload (`/api/sign-languages`)
+### 3. Sensor Data (`/api/sensor-data`)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/uploadpicture` | อัพโหลดรูปท่าภาษามือไปยัง MinIO (`imageUrl`) |
-| POST | `/uploadvideo` | อัพโหลดคลิปสาธิตท่าทางไปยัง MinIO (`videoUrl`) — mp4, mov, avi, webm |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/predict` | POST | ทำนายจาก structured JSON frames |
+| `/predict/raw` | POST | ทำนายจาก raw ESP32 text format (`S ... E`) |
 
-### Data Collector (`/collector`)
+### 4. Device Management (`/api/devices`)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/start` | เริ่มเก็บ data จาก serial port |
-| POST | `/stop` | หยุดเก็บ data |
-| GET | `/status` | เช็คสถานะ |
+จัดการ device registration + ผูกโมเดลกับอุปกรณ์
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | ดู device ทั้งหมด |
+| `/{device_id}` | GET | ดู device ตาม ID |
+| `/` | POST | ลงทะเบียน device ใหม่ + assign model อัตโนมัติ |
+| `/{device_id}` | PUT | เปลี่ยนโมเดลที่ผูกกับ device |
+| `/{device_id}` | DELETE | ลบ device |
+
+### 5. Sign Language Dictionary (`/api/sign-languages`)
+
+CRUD สำหรับคลังคำศัพท์ภาษามือ (50 คำ ไทย/อังกฤษ)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | ดึงรายการทั้งหมด (`?category=` filter) |
+| `/{id}` | GET | ดึงตาม ID |
+| `/` | POST | เพิ่มคำใหม่ |
+| `/{id}` | PUT | แก้ไข |
+| `/{id}` | DELETE | ลบ |
+| `/uploadpicture` | POST | อัพโหลดรูปภาพไปยัง MinIO |
+| `/uploadvideo` | POST | อัพโหลดวิดีโอสาธิตไปยัง MinIO |
+
+---
+
+## Unified WebSocket
+
+Frontend connect WebSocket เดียว — ใช้ `state` ตัดสินใจว่าจะโชว์หน้าไหน:
+
+```
+ws://localhost:8000/api/glove/ws?device_id=default
+```
+
+**Payload ที่ได้รับ:**
+
+```json
+{
+  "status": "online",
+  "state": "gesture",
+  "hand": "right",
+  "round": "done",
+  "thai_word": "ฉันหิว",
+  "eng_word": "I hungry",
+  "recording": true,
+  "complete": false,
+  "word_count": 2,
+  "calibrate_left": true,
+  "calibrate_right": false,
+  "right_voltage": 3.95,
+  "right_battery": 72.2,
+  "left_voltage": 4.01,
+  "left_battery": 78.9
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | `online` / `offline` | สถานะ heartbeat |
+| `state` | `idle` / `calibrate` / `gesture` | สถานะปัจจุบัน |
+| `hand` | `left` / `right` | มือที่กำลัง calibrate |
+| `round` | `1`-`5` / `done` | รอบ calibration |
+| `thai_word` | string | ประโยคภาษาไทยที่สะสม |
+| `eng_word` | string | ประโยคภาษาอังกฤษ |
+| `recording` | boolean | กำลังบันทึกท่ามืออยู่ |
+| `complete` | boolean | ประโยคสมบูรณ์แล้ว |
+| `word_count` | number | จำนวนคำที่ทำนายได้ |
+| `*_voltage` | number | แรงดัน battery (V) |
+| `*_battery` | number | เปอร์เซ็นต์ battery |
 
 ---
 
 ## Communication Flow
 
-### Full System Flow
-
 ```
 ESP32 (ถุงมือ)                  Backend                       Frontend (App)
       │                            │                              │
-  ① Health Check                   │                              │
+  ① Heartbeat                      │                              │
       │──POST /heartbeat ────────►│                              │
-      │  (ทุก 5 วิ)               │                              │
+      │  (ทุก 5 วิ + voltage)     │                              │
       │                            │                              │
   ② Calibrate                      │◄─── WS /ws ─────────────────│
       │──POST /calibrate/start ──►│     (connect ครั้งเดียว)      │
@@ -125,7 +205,7 @@ ESP32 (ถุงมือ)                  Backend                       Fronte
       │                            │                              │
   ③ Gesture Recording              │                              │
       │──POST /gesture/start ────►│                              │
-      │──POST /predict/raw ──────►│  (predict + buffer word)     │
+      │──POST /predict ──────────►│  (predict + buffer word)     │
       │  (ส่ง sensor data)         │──── push {thai_word} ───────►│
       │                            │                              │
   ④ Gesture Done (5s timeout)      │                              │
@@ -134,111 +214,152 @@ ESP32 (ถุงมือ)                  Backend                       Fronte
   ⑤ ทำท่าถัดไป (กลับไป ③)          │                              │
 ```
 
-### ESP32 → Backend Protocol
+---
+
+## ML Pipeline
+
+### Model Architecture
+
+**CNN-LSTM + XGBoost Ensemble (Soft Voting 50:50)**
 
 ```
-1. POST /api/glove/heartbeat               → health check
-2. POST /api/glove/calibrate/start         → เริ่ม calibration (hand: left/right)
-3. POST /api/glove/calibrate/update        → {step:"open/close/done", round:1-5}
-4. POST /api/glove/gesture/start           → เริ่มทำท่ามือ
-5. POST /api/sensor-data/predict/raw       → {raw_data: "S 60 2824 ... E"}
-6. POST /api/glove/gesture/stop            → หยุด (timeout 5 วิ)
+Raw Sensor Data (22 features × N frames)
+        │
+        ▼
+  Resample → 70 frames (interpolation)
+        │
+        ▼
+  Zero-Starting Normalization
+        │
+   ┌────┴────┐
+   ▼         ▼
+CNN-LSTM   XGBoost
+   │         │
+   ▼         ▼
+Softmax   predict_proba
+   │         │
+   └────┬────┘
+        ▼
+  Ensemble (avg)
+        ▼
+  Predicted Sign
 ```
 
-### Frontend — Unified WebSocket
-
-Frontend connect แค่ WebSocket เดียว แล้วใช้ `state` ตัดสินใจว่าจะโชว์หน้าไหน:
-
-```javascript
-const ws = new WebSocket("ws://localhost:8000/api/glove/ws?device_id=default");
-ws.onmessage = (e) => {
-  const data = JSON.parse(e.data);
-  // data = {
-  //   status: "online" | "offline",
-  //   state: "idle" | "calibrate" | "gesture",
-  //   hand: "left" | "right",
-  //   round: "1"-"5" | "done",
-  //   thai_word: "ฉันหิว",
-  //   eng_word: "I hungry",
-  //   recording: true/false,
-  //   complete: true/false,
-  //   word_count: 2
-  // }
-
-  if (data.state === "calibrate") showCalibrationPage(data);
-  else if (data.state === "gesture") showGesturePage(data);
-  else showIdlePage(data);
-};
-```
-
-### Data Format (22 values per frame)
+### Sensor Data Format (22 values per frame)
 
 ```
 L_F1 L_F2 L_F3 L_F4 L_F5 L_Ax L_Ay L_Az L_Gx L_Gy L_Gz R_F1 R_F2 R_F3 R_F4 R_F5 R_Ax R_Ay R_Az R_Gx R_Gy R_Gz
 ```
 
-- `L_F1-F5` — Left hand flex sensors
-- `L_Ax/Ay/Az` — Left hand accelerometer
-- `L_Gx/Gy/Gz` — Left hand gyroscope
-- `R_*` — Right hand (same layout)
+| Sensor | Fields | Description |
+|--------|--------|-------------|
+| Flex (×5 per hand) | `F1`-`F5` | ค่างอนิ้ว (0-100) |
+| Accelerometer (×3 per hand) | `Ax`, `Ay`, `Az` | ความเร่ง |
+| Gyroscope (×3 per hand) | `Gx`, `Gy`, `Gz` | ความเร็วเชิงมุม |
 
----
-
-## Scripts
+### Training
 
 ```bash
-uv sync                                        # Install dependencies
-uv sync --dev                                   # Install dev dependencies
-uv run python scripts/seed_sign_languages.py    # Seed dictionary (50 words)
-uv run python -m app.services.train_model       # Train model
-uv run uvicorn app.main:app --reload            # Run server
+uv run python -m app.services.train_model --model-name <version>
+
+# ตัวอย่าง
+uv run python -m app.services.train_model --model-name v1
 ```
+
+- อ่าน CSV จาก `app/dataset/` (แต่ละโฟลเดอร์ = 1 ท่ามือ)
+- เทรน CNN-LSTM (100 epochs) + XGBoost
+- เซฟไฟล์ลง `app/models_trained/` + อัพโหลดขึ้น MinIO อัตโนมัติ
+- Output: `<name>_cnnlstm.pth`, `<name>_xgb.json`, `<name>_labels_map.json`
+
+### Model Management
+
+- โมเดลเก็บใน **MinIO** (`smartglove-models` bucket) จัดกลุ่มตาม model name
+- เมื่อ server start จะดาวน์โหลดจาก MinIO มาเก็บใน RAM (memory cache)
+- แต่ละ device สามารถผูกกับโมเดลคนละเวอร์ชันได้
+
+---
 
 ## Project Structure
 
 ```
 app/
-├── main.py                    # FastAPI entry point
-├── config.py                  # Settings (pydantic-settings)
-├── database.py                # MongoDB connection (motor)
-├── models/                    # Pydantic DB models
-├── schemas/
-│   ├── sign_language.py       # Sign language CRUD schemas
-│   └── sensor_data.py         # Prediction request/response schemas
+├── main.py                       # FastAPI entry point + lifespan
+├── config.py                     # Settings (pydantic-settings + .env)
+├── database.py                   # MongoDB connection (motor async)
+│
 ├── routers/
-│   ├── glove.py               # ★ Heartbeat, calibration, gesture, WebSocket
-│   ├── sensor_data.py         # Prediction endpoints (/predict, /predict/raw)
-│   ├── sign_language.py       # CRUD endpoints
-│   ├── upload.py              # Image & video upload to MinIO
-│   └── data_collector.py      # Data collection endpoints
+│   ├── glove.py                  # ★ Heartbeat, Calibration, Gesture, WebSocket
+│   ├── predict.py                # Device-bound prediction endpoint
+│   ├── sensor_data.py            # JSON/Raw prediction + sentence buffer
+│   ├── devices.py                # Device registration + model assignment
+│   ├── sign_language.py          # Dictionary CRUD
+│   ├── upload.py                 # Image & video upload to MinIO
+│   └── data_collector.py         # Serial port data collection
+│
 ├── services/
-│   ├── prediction_service.py  # CNN-LSTM + XGBoost ensemble inference
-│   ├── prediction_stream.py   # ESP32 raw data parser (parse_raw_frames)
-│   ├── sentence_buffer.py     # Word → sentence accumulator + WebSocket events
+│   ├── prediction_service.py     # CNN-LSTM + XGBoost ensemble inference
+│   ├── prediction_stream.py      # ESP32 raw data parser (S...E format)
+│   ├── sentence_buffer.py        # Word accumulator + async WebSocket events
+│   ├── device_service.py         # Device CRUD + model assignment logic
+│   ├── model_manager.py          # MinIO model upload/download/cache
 │   ├── sign_language_service.py  # DB CRUD + label lookup
-│   ├── minio_service.py       # MinIO object storage
-│   ├── data_collector.py      # Serial port data collection → CSV
-│   └── train_model.py         # Model training script
-├── dataset/                   # Training CSV data (per gesture folder)
-├── models_trained/            # Saved models (.pth, .json, labels_map.json)
+│   ├── minio_service.py          # MinIO object storage
+│   ├── data_collector.py         # Serial port → CSV collection
+│   └── train_model.py            # Training pipeline (CNN-LSTM + XGBoost)
+│
+├── models/                       # Pydantic DB models
+├── schemas/                      # Request/response schemas
+├── dataset/                      # Training data (CSV per gesture folder)
+├── models_trained/               # Local model files (.pth, .json)
 └── utils/
-    └── object_id.py           # PyObjectId for Pydantic v2
+    └── object_id.py              # PyObjectId for Pydantic v2
 
 scripts/
-└── seed_sign_languages.py     # Import 50 words from Excel → MongoDB
+├── seed_sign_languages.py        # Import 50 words from Excel → MongoDB
+└── rename_dataset.py             # Batch rename dataset folders/files
 
-docker-compose.yml             # MongoDB + Mongo Express + MinIO
-pyproject.toml                 # Dependencies (uv)
+glove/                            # ESP32 Arduino code (left & right hand)
+
+docker-compose.yml                # MongoDB + Mongo Express + MinIO + Backend
+pyproject.toml                    # Dependencies (uv)
 ```
+
+---
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MONGODB_URL` | `mongodb://admin:smartglove2026@localhost:27017/smart_glove?authSource=admin` | MongoDB connection string |
-| `DATABASE_NAME` | `smart_glove` | Database name |
-| `GLOVE_HEARTBEAT_TIMEOUT` | `15` | วินาทีก่อนถือว่าถุงมือ offline |
-| `MINIO_ENDPOINT` | `localhost:9000` | MinIO endpoint |
-| `MINIO_ACCESS_KEY` | `minioadmin` | MinIO access key |
-| `MINIO_SECRET_KEY` | `minioadmin123` | MinIO secret key |
-| `MINIO_BUCKET` | `smartglove-images` | MinIO bucket name |
+```env
+# MongoDB
+MONGODB_URL=mongodb://admin:smartglove2026@localhost:27017/smart_glove?authSource=admin
+DATABASE_NAME=smart_glove
+
+# MinIO
+MINIO_ENDPOINT=127.0.0.1:9000
+MINIO_PUBLIC_URL=http://localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin123
+MINIO_BUCKET=smartglove-images
+MINIO_SECURE=false
+```
+
+| Variable | Description |
+|----------|-------------|
+| `MONGODB_URL` | MongoDB connection string |
+| `DATABASE_NAME` | ชื่อ database |
+| `MINIO_ENDPOINT` | MinIO endpoint (internal) |
+| `MINIO_PUBLIC_URL` | MinIO URL ที่เข้าถึงได้จากภายนอก |
+| `MINIO_ACCESS_KEY` | MinIO access key |
+| `MINIO_SECRET_KEY` | MinIO secret key |
+| `MINIO_BUCKET` | Bucket สำหรับเก็บรูป/วิดีโอ |
+
+---
+
+## Common Commands
+
+```bash
+uv sync                                                          # Install dependencies
+docker compose up -d                                              # Start infrastructure
+uv run uvicorn app.main:app --reload                              # Run dev server
+uv run python -m app.services.train_model --model-name v1         # Train model
+uv run python scripts/seed_sign_languages.py                      # Seed dictionary
+```

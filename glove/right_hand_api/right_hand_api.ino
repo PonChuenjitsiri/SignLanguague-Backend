@@ -1,27 +1,29 @@
 #include <Adafruit_ADS1X15.h>
 #include <Arduino.h>
+#include <HTTPClient.h>
 #include <MPU9250_asukiaaa.h>
 #include <Preferences.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h> // 🌟 เพิ่มไลบรารีสำหรับ HTTPS
+#include <WiFiProv.h>
 #include <Wire.h>
 #include <vector>
-
-// --- WiFi & HTTP ---
-#include <HTTPClient.h>
-#include <WiFi.h>
-#include <WiFiProv.h>
 
 HardwareSerial HC12(1);
 #define HC12_RX 20
 #define HC12_TX 21
+#define PIN_BTN_R 5
 
-const int PIN_LED = 10;
-const int PIN_BTN_R = 5;
+// --- RGB LED Pins ---
+#define PIN_LED_B 10
+#define PIN_LED_G 9
+#define PIN_LED_R 8
 
-const int FLEX_PIN_R[5] = {0, 1, -1, 3, 4};
-const int ADS_CHANNEL_MID = 2;
+const int FLEX_PIN_R[5] = {4, 3, -1, 1, 0};
+const int ADS_CHANNEL_MID = 3;
 const uint8_t SIG_VBAT = 0xEB;
-const int ADS_CH_VBAT = 0;    // ADS channel A0 สำหรับ voltage divider
-const float VBAT_RATIO = 2.0; // R1=R2=10k → คูณ 2 คืน
+const int ADS_CH_VBAT = 1;
+const float VBAT_RATIO = 2.0;
 
 float leftVoltage = -1.0f;
 
@@ -31,10 +33,9 @@ const char *service_name = "PROV_ESP32_C3";
 const char *pop = "123456";
 
 const String SERVER_URL = "https://smb.pon-hub.com";
-const String DEVICE_ID = "default";
+String DEVICE_ID = "default";
 
 const unsigned long HEARTBEAT_INTERVAL = 5000;
-const unsigned long BOTH_BTN_HOLD_MS = 2000;
 const unsigned long STOP_HOLD_MS = 2000;
 const unsigned long LONG_PRESS_MS = 3000;
 const unsigned long SENSOR_INTERVAL = 20;
@@ -84,85 +85,86 @@ enum State {
 State currentState = IDLE;
 
 bool is_connected = false;
-
+bool is_registered = false;
 unsigned long btnPressStart = 0;
 bool isBtnHeld = false;
 bool actionTriggered = false;
-
 unsigned long lastHeartbeat = 0;
 
-unsigned long bothBtnStart = 0;
-bool bothBtnActive = false;
-bool leftBtnPressed = false;
+// =====================================================
+// RGB LED Control
+// =====================================================
+void setLED(bool r, bool g, bool b) {
+  digitalWrite(PIN_LED_R, r ? HIGH : LOW);
+  digitalWrite(PIN_LED_G, g ? HIGH : LOW);
+  digitalWrite(PIN_LED_B, b ? HIGH : LOW);
+}
 
-// =====================================================
-// Forward declarations
-// =====================================================
-void blinkLED(int times, int duration);
-String d2s(GloveData d);
-void readFlexSensors(int raw[5]);
-void readMPU(GloveData &d);
-bool checkMovementR(GloveData current);
-void waitForUserAction();
-void saveCalibrationToFlash();
-void loadCalibrationFromFlash();
-bool httpPost(String path, String jsonBody);
-void sendHeartbeat();
-void apiCalibrateStart(String hand);
-void apiCalibrateUpdate(String step, int round);
-void apiGestureStart();
-void apiGestureStop();
-void sendPredictRaw();
-void calibrateRight();
-void handleLeftCalibrationUpdate(uint8_t cmd, uint8_t round);
-
-// =====================================================
-// WiFi Provisioning Event Handler
-// =====================================================
-void SysProvEvent(arduino_event_t *sys_event) {
-  switch (sys_event->event_id) {
-  case ARDUINO_EVENT_PROV_START:
-    Serial.println("\nProvisioning Started. Open 'ESP BLE Provisioning' App!");
-    Serial.print("Device Name: ");
-    Serial.println(service_name);
-    break;
-  case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-    Serial.print("\nConnected! IP: ");
-    Serial.println(WiFi.localIP());
-    is_connected = true;
-    break;
-  case ARDUINO_EVENT_PROV_CRED_RECV:
-    Serial.println("\nReceived Wi-Fi credentials...");
-    break;
-  case ARDUINO_EVENT_PROV_END:
-    Serial.println("\nProvisioning Ended.");
-    break;
-  default:
-    break;
+void blinkRGB(bool r, bool g, bool b, int times, int duration) {
+  for (int i = 0; i < times; i++) {
+    setLED(r, g, b);
+    delay(duration);
+    setLED(0, 0, 0);
+    if (i < times - 1)
+      delay(duration);
   }
 }
 
 // =====================================================
-// HTTP Helpers
+// HTTP Helpers (อัปเดต HTTPS และเพิ่มฟังก์ชัน Register)
 // =====================================================
+
+// 🌟 อัปเดตฟังก์ชันลงทะเบียน 🌟
+void registerDeviceWithBackend() {
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFiClientSecure secureClient;
+    secureClient.setInsecure();
+
+    HTTPClient http;
+    String registerUrl = SERVER_URL + "/api/devices/";
+
+    http.begin(secureClient, registerUrl);
+    http.addHeader("Content-Type", "application/json");
+
+    String body = "{\"device_id\":\"" + DEVICE_ID + "\"}";
+
+    Serial.println("\n[System] Registering Device ID: " + DEVICE_ID);
+    int code = http.POST(body);
+
+    if (code > 0) {
+      if (code == 201 || code == 200) {
+        Serial.println("🎉 [SUCCESS] Device registered on Backend!");
+        is_registered = true; // 👈 เพิ่มบรรทัดนี้
+      } else if (code == 400) {
+        Serial.println("ℹ️ [INFO] Device already registered.");
+        is_registered = true; // 👈 เพิ่มบรรทัดนี้
+      } else {
+        Serial.println("⚠️ [WARN] Unexpected code: " + String(code));
+      }
+    } else {
+      Serial.println("❌ [ERROR] Registration failed. Code: " + String(code));
+    }
+    http.end();
+  }
+}
+
+// 🌟 อัปเดต HTTP Post ให้ใช้ WiFiClientSecure 🌟
 bool httpPost(String path, String jsonBody) {
   if (!is_connected)
     return false;
+
+  WiFiClientSecure secureClient;
+  secureClient.setInsecure(); // ข้ามตรวจสอบ SSL
+
   HTTPClient http;
-  http.begin(SERVER_URL + path);
+  http.begin(secureClient, SERVER_URL + path); // ใช้ secureClient ผูกกับ URL
   http.addHeader("Content-Type", "application/json");
   http.setTimeout(5000);
+
   int code = http.POST(jsonBody);
-  String resp = http.getString();
   http.end();
-  if (code > 0) {
-    Serial.printf("[HTTP %d] %s -> %s\n", code, path.c_str(), resp.c_str());
-    return (code >= 200 && code < 300);
-  } else {
-    Serial.printf("[HTTP ERROR] %s -> %s\n", path.c_str(),
-                  http.errorToString(code).c_str());
-    return false;
-  }
+
+  return (code >= 200 && code < 300);
 }
 
 void sendHeartbeat() {
@@ -192,14 +194,19 @@ void apiGestureStop() {
   httpPost("/api/glove/gesture/stop", "{\"device_id\":\"" + DEVICE_ID + "\"}");
 }
 
-// =====================================================
-// Send prediction data via HTTP
-// =====================================================
+String d2s(GloveData d) {
+  char b[128];
+  snprintf(b, sizeof(b), "%d %d %d %d %d %.2f %.2f %.2f %.2f %.2f %.2f",
+           d.flex[0], d.flex[1], d.flex[2], d.flex[3], d.flex[4],
+           d.accel[0] / 100.0, d.accel[1] / 100.0, d.accel[2] / 100.0,
+           d.gyro[0] / 100.0, d.gyro[1] / 100.0, d.gyro[2] / 100.0);
+  return String(b);
+}
+
 void sendPredictRaw() {
   int maxFrames = max((int)bufL.size(), (int)bufR.size());
   if (maxFrames < 5) {
-    Serial.println("DISCARD: too few frames");
-    blinkLED(2, 50);
+    blinkRGB(1, 0, 0, 2, 100);
     return;
   }
   while (bufL.size() < maxFrames)
@@ -219,12 +226,46 @@ void sendPredictRaw() {
   rawData.replace("\"", "\\\"");
   rawData.replace("\n", "\\n");
 
-  String json = "{\"raw_data\":\"" + rawData + "\"}";
+  String json =
+      "{\"device_id\":\"" + DEVICE_ID + "\",\"raw_data\":\"" + rawData + "\"}";
   Serial.printf("Sending %d frames to /predict/raw...\n", maxFrames);
-  httpPost("/api/sensor-data/predict/raw", json);
-  blinkLED(3, 100);
+
+  if (httpPost("/predict/",
+               json)) { // ปรับ path เป็นไปตาม Backend ของคุณ (เช่น /api/predict)
+    blinkRGB(0, 1, 0, 2, 100);
+  } else {
+    blinkRGB(1, 0, 0, 3, 100);
+  }
 }
 
+// =====================================================
+// WiFi Provisioning Event Handler
+// =====================================================
+void SysProvEvent(arduino_event_t *sys_event) {
+  switch (sys_event->event_id) {
+  case ARDUINO_EVENT_PROV_START:
+    Serial.println("\nProvisioning Started. Open 'ESP BLE Provisioning' App!");
+    break;
+  case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+    Serial.print("\nConnected! IP: ");
+    Serial.println(WiFi.localIP());
+    is_connected = true;
+
+    // ❌ ลบบรรทัด registerDeviceWithBackend(); ออกจากตรงนี้
+
+    setLED(0, 0, 1); // สำเร็จแล้วเปิดสีน้ำเงิน
+    break;
+  case ARDUINO_EVENT_PROV_END:
+    Serial.println("\nProvisioning Ended.");
+    break;
+  default:
+    break;
+  }
+}
+
+// =====================================================
+// Hardware & Calibration Helpers
+// =====================================================
 float readBatteryVoltage() {
   if (!adsReady)
     return -1.0f;
@@ -232,9 +273,6 @@ float readBatteryVoltage() {
   return (raw * 0.125f / 1000.0f) * VBAT_RATIO;
 }
 
-// =====================================================
-// Flash Memory
-// =====================================================
 void saveCalibrationToFlash() {
   preferences.begin("glove-cal", false);
   preferences.putBytes("fMin", flexMin, sizeof(flexMin));
@@ -242,7 +280,6 @@ void saveCalibrationToFlash() {
   preferences.putInt("tFlex", t_flex);
   preferences.putBool("isCal", true);
   preferences.end();
-  Serial.println(">> Calibration Saved to Flash!");
 }
 
 void loadCalibrationFromFlash() {
@@ -252,23 +289,8 @@ void loadCalibrationFromFlash() {
     preferences.getBytes("fMin", flexMin, sizeof(flexMin));
     preferences.getBytes("fMax", flexMax, sizeof(flexMax));
     t_flex = preferences.getInt("tFlex", 200);
-    Serial.println(">> Calibration Loaded from Flash!");
-    Serial.printf(">> Flex Threshold: %d\n", t_flex);
   }
   preferences.end();
-}
-
-// =====================================================
-// Utilities
-// =====================================================
-void blinkLED(int times, int duration) {
-  for (int i = 0; i < times; i++) {
-    digitalWrite(PIN_LED, HIGH);
-    delay(duration);
-    digitalWrite(PIN_LED, LOW);
-    if (i < times - 1)
-      delay(duration);
-  }
 }
 
 void readMPU(GloveData &d) {
@@ -292,15 +314,6 @@ void waitForUserAction() {
   while (digitalRead(PIN_BTN_R) == HIGH)
     delay(10);
   delay(100);
-}
-
-String d2s(GloveData d) {
-  char b[128];
-  snprintf(b, sizeof(b), "%d %d %d %d %d %.2f %.2f %.2f %.2f %.2f %.2f",
-           d.flex[0], d.flex[1], d.flex[2], d.flex[3], d.flex[4],
-           d.accel[0] / 100.0, d.accel[1] / 100.0, d.accel[2] / 100.0,
-           d.gyro[0] / 100.0, d.gyro[1] / 100.0, d.gyro[2] / 100.0);
-  return String(b);
 }
 
 void readFlexSensors(int raw[5]) {
@@ -331,35 +344,28 @@ bool checkMovementR(GloveData current) {
   return false;
 }
 
-// =====================================================
-// Calibrate RIGHT hand (local)
-// =====================================================
 void calibrateRight() {
   Serial.println("\n=== CALIBRATION MODE (RIGHT HAND) ===");
   currentState = CALIBRATING_RIGHT;
   apiCalibrateStart("right");
-  blinkLED(5, 100);
-  digitalWrite(PIN_LED, HIGH);
+  blinkRGB(1, 0, 1, 5, 100);
 
   long sumOpen[5] = {0, 0, 0, 0, 0};
   long sumClose[5] = {0, 0, 0, 0, 0};
 
   for (int round = 1; round <= 5; round++) {
-    Serial.printf(">> ROUND %d/5\n", round);
-
-    Serial.println(" [ACTION] OPEN hand -> Press Button");
+    setLED(1, 0, 1);
     apiCalibrateUpdate("open", round);
     waitForUserAction();
-    digitalWrite(PIN_LED, LOW);
+    setLED(0, 0, 0);
     {
       int rawF[5];
       readFlexSensors(rawF);
       for (int i = 0; i < 5; i++)
         sumOpen[i] += rawF[i];
     }
-    Serial.println(" Read Open Done.");
 
-    Serial.println(" [ACTION] CLOSE hand -> Press Button");
+    setLED(1, 0, 1);
     apiCalibrateUpdate("close", round);
     waitForUserAction();
     {
@@ -368,11 +374,8 @@ void calibrateRight() {
       for (int i = 0; i < 5; i++)
         sumClose[i] += rawF[i];
     }
-    Serial.println(" Read Close Done.");
 
-    blinkLED(2, 100);
-    if (round < 5)
-      digitalWrite(PIN_LED, HIGH);
+    blinkRGB(1, 0, 1, 2, 100);
   }
 
   for (int i = 0; i < 5; i++) {
@@ -380,46 +383,57 @@ void calibrateRight() {
     flexMax[i] = sumClose[i] / 5;
     if (flexMin[i] == flexMax[i])
       flexMax[i] += 1;
-    Serial.printf(" F%d Min: %d | Max: %d\n", i, flexMin[i], flexMax[i]);
   }
   t_flex = 10;
   isCalibrated = true;
   saveCalibrationToFlash();
 
   apiCalibrateUpdate("done", 5);
-  Serial.println(">> RIGHT HAND CALIBRATION DONE!");
-  blinkLED(3, 200);
+  blinkRGB(0, 1, 0, 3, 200);
 
   currentState = IDLE;
+  setLED(0, 0, 1);
   while (digitalRead(PIN_BTN_R) == HIGH)
     delay(10);
   isBtnHeld = false;
   actionTriggered = false;
 }
 
-// =====================================================
-// Handle left hand calibration updates (via HC12)
-// =====================================================
 void handleLeftCalibrationUpdate(uint8_t cmd, uint8_t round) {
   currentState = CALIBRATING_LEFT;
+  setLED(1, 0, 1);
   if (cmd == CAL_OPEN) {
-    Serial.printf("[LEFT CAL] Round %d -> open\n", round);
     apiCalibrateUpdate("open", round);
   } else if (cmd == CAL_CLOSE) {
-    Serial.printf("[LEFT CAL] Round %d -> close\n", round);
     apiCalibrateUpdate("close", round);
   } else if (cmd == CAL_DONE) {
-    Serial.println("[LEFT CAL] Done!");
     apiCalibrateUpdate("done", 5);
     currentState = IDLE;
+    setLED(0, 0, 1);
   }
 }
 
 // =====================================================
-// setup()
+// MAIN SETUP
 // =====================================================
 void setup() {
   Serial.begin(115200);
+
+  WiFi.mode(WIFI_STA);
+
+  // สร้าง DEVICE_ID จาก MAC Address
+  String mac = WiFi.macAddress();
+  mac.replace(":", "");
+  DEVICE_ID = "GLOVE_" + mac;
+
+  Serial.println("=================================");
+  Serial.println("DEVICE ID: " + DEVICE_ID);
+  Serial.println("=================================");
+
+  pinMode(PIN_BTN_R, INPUT);
+  pinMode(PIN_LED_R, OUTPUT);
+  pinMode(PIN_LED_G, OUTPUT);
+  pinMode(PIN_LED_B, OUTPUT);
 
   WiFi.onEvent(SysProvEvent);
   WiFiProv.beginProvision(NETWORK_PROV_SCHEME_BLE,
@@ -429,8 +443,6 @@ void setup() {
   HC12.begin(115200, SERIAL_8N1, HC12_RX, HC12_TX);
   analogReadResolution(12);
 
-  pinMode(PIN_BTN_R, INPUT);
-  pinMode(PIN_LED, OUTPUT);
   Wire.begin(6, 7);
   mpu.setWire(&Wire);
   mpu.beginAccel();
@@ -439,36 +451,48 @@ void setup() {
   if (ads.begin(0x48)) {
     ads.setGain(GAIN_ONE);
     adsReady = true;
-    Serial.println("ADS1115 ready!");
-  } else {
-    Serial.println("WARNING: ADS1115 not found!");
   }
 
-  Serial.println("\n--- MASTER (RIGHT HAND) READY ---");
   loadCalibrationFromFlash();
+  Serial.println("\n--- MASTER (API) READY ---");
+
+  delay(300);
+  while (digitalRead(PIN_BTN_R) == HIGH)
+    delay(10);
+  isBtnHeld = false;
+  actionTriggered = false;
 }
 
 // =====================================================
-// loop()
+// MAIN LOOP
 // =====================================================
 void loop() {
-  static bool was_connected = false;
-  if (is_connected && !was_connected) {
-    Serial.println("WiFi connected! Glove running...");
-    was_connected = true;
+  // --- แจ้งเตือนสถานะ WiFi ด้วยไฟกระพริบน้ำเงิน ---
+  if (!is_connected) {
+    static unsigned long lastBlink = 0;
+    static bool ledState = false;
+    if (millis() - lastBlink > 500) {
+      lastBlink = millis();
+      ledState = !ledState;
+      setLED(0, 0, ledState);
+    }
   }
 
-  // =========================================
-  // Heartbeat every 5 seconds
-  // =========================================
-  if (is_connected && millis() - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+  // 🌟 1. ดักการลงทะเบียนตรงนี้แทน (ปลอดภัยกว่า 100%)
+  if (is_connected && !is_registered) {
+    registerDeviceWithBackend();
+    if (!is_registered) {
+      delay(5000); // ถ้ายิงไม่ผ่าน ให้รอ 5 วิแล้ว loop หน้าค่อยยิงใหม่
+    }
+  }
+
+  // 🌟 2. ดัก Heartbeat ห้ามยิงตอน RECORDING เด็ดขาด
+  if (is_connected && is_registered && currentState == IDLE &&
+      millis() - lastHeartbeat >= HEARTBEAT_INTERVAL) {
     lastHeartbeat = millis();
     sendHeartbeat();
   }
 
-  // =========================================
-  // Read HC12 (left hand messages)
-  // =========================================
   if (HC12.available()) {
     uint8_t hdr = HC12.read();
 
@@ -479,18 +503,14 @@ void loop() {
         uint8_t lo = HC12.read();
         int16_t mv = (int16_t)((hi << 8) | lo);
         leftVoltage = mv / 1000.0f;
-        Serial.printf("[HC12] Left voltage: %.3fV\n", leftVoltage);
       }
-    }
-
-    if (hdr == SIG_CANCEL) {
+    } else if (hdr == SIG_CANCEL) {
       if (currentState == RECORDING) {
-        Serial.println("[LEFT BTN] Clear data -> restart recording");
         bufL.clear();
         bufR.clear();
-        memset(&lastDataR, 0,
-               sizeof(GloveData)); // ล้างค่า lastData ด้วย จะได้วัดการเคลื่อนไหวใหม่ถูก
-        blinkLED(2, 100);
+        memset(&lastDataR, 0, sizeof(GloveData));
+        blinkRGB(1, 1, 0, 3, 100);
+        setLED(1, 0, 0);
       }
     } else if (hdr == CMD_CAL_LEFT) {
       delay(10);
@@ -511,23 +531,36 @@ void loop() {
         bufL.push_back(temp);
       }
     } else if (hdr == CMD_END && currentState == RECEIVING_LEFT) {
-      Serial.println("Left data received. Sending to backend...");
+      sendPredictRaw();
+
       bufL.clear();
       bufR.clear();
       memset(&lastDataR, 0, sizeof(GloveData));
       HC12.write(CMD_START);
-
       currentState = RECORDING;
-      Serial.println(">> READY FOR NEXT GESTURE (Continuous Mode)");
+      setLED(1, 0, 0);
     }
   }
 
   // =========================================
-  // Right button handling
+  // ระบบปุ่มกดมือขวา (แก้ไขบั๊กกดค้างแล้วลั่น)
   // =========================================
-  int btnR = digitalRead(PIN_BTN_R);
+  int readingR = digitalRead(PIN_BTN_R);
+  static uint32_t lastDebounceTimeR = 0;
+  static int lastReadingR = LOW;
+  static int btnStateR = LOW;
 
-  if (btnR == HIGH) {
+  if (readingR != lastReadingR) {
+    lastDebounceTimeR = millis();
+  }
+  if ((millis() - lastDebounceTimeR) > 50) {
+    if (readingR != btnStateR) {
+      btnStateR = readingR;
+    }
+  }
+  lastReadingR = readingR;
+
+  if (btnStateR == HIGH) {
     if (!isBtnHeld) {
       isBtnHeld = true;
       btnPressStart = millis();
@@ -535,62 +568,54 @@ void loop() {
     } else {
       unsigned long heldMs = millis() - btnPressStart;
 
-      // Hold 2s in RECORDING -> stop gesture -> back to IDLE (no predict)
+      // กดค้าง 2 วิ ตอนกำลังอัด = ยกเลิกคำนั้น
       if (heldMs > STOP_HOLD_MS && !actionTriggered) {
         if (currentState == RECORDING) {
-          actionTriggered = true;
-          Serial.println(">> RIGHT BTN 2s HOLD -> ABORT RECORDING");
-
-          apiGestureStop();      // ยิง API Stop ตามที่ต้องการ
-          HC12.write(CMD_ABORT); // สั่งให้ซ้ายล้างข้อมูลและกลับไป IDLE
-
+          actionTriggered = true; // 🌟 ล็อคไว้ไม่ให้ทำงานซ้ำตอนปล่อยนิ้ว
+          apiGestureStop();
+          HC12.write(CMD_ABORT);
           bufL.clear();
           bufR.clear();
           memset(&lastDataR, 0, sizeof(GloveData));
-
           currentState = IDLE;
-          blinkLED(3, 150);
-          isBtnHeld = false;
-          return;
+          blinkRGB(1, 1, 0, 3, 150); // เหลือง 3 ที
+          setLED(0, 0, 1);           // กลับเป็นน้ำเงิน
         }
       }
 
-      // Hold 3s in IDLE -> calibrate right
+      // กดค้าง 3 วิ ตอนอยู่ว่างๆ = ตั้งค่าเซนเซอร์
       if (heldMs > LONG_PRESS_MS && !actionTriggered) {
-        if (currentState == IDLE) {
-          actionTriggered = true;
+        if (currentState == IDLE && is_connected) {
+          actionTriggered = true; // 🌟 ล็อคไว้ไม่ให้ทำงานซ้ำ
           calibrateRight();
-          isBtnHeld = false;
-          btnPressStart = millis();
-          return;
         }
       }
     }
   } else {
+    // 🌟 จังหวะยกนิ้วออกจากปุ่ม 🌟
     if (isBtnHeld) {
       if (!actionTriggered && (millis() - btnPressStart > 50)) {
-        if (currentState == IDLE) {
+        if (currentState == IDLE && is_connected) {
+          // -> เริ่มอัด
           currentState = RECORDING;
           bufL.clear();
           bufR.clear();
+          memset(&lastDataR, 0, sizeof(GloveData));
           HC12.write(CMD_START);
           apiGestureStart();
-          Serial.println(">> GESTURE START");
-          blinkLED(1, 100);
+          setLED(1, 0, 0); // แดง
         } else if (currentState == RECORDING) {
+          // -> หยุดอัด
           currentState = RECEIVING_LEFT;
           HC12.write(CMD_STOP);
-          Serial.println(">> Waiting for left hand data...");
-          blinkLED(1, 100);
+          setLED(0, 1, 0); // เขียวค้าง รอข้อมูล
         }
       }
-      isBtnHeld = false;
+      isBtnHeld = false; // 🌟 รีเซ็ตปุ่มที่นี่ที่เดียวเท่านั้น!
     }
   }
+  // =========================================
 
-  // =========================================
-  // Sensor recording (50Hz)
-  // =========================================
   if (currentState == RECORDING) {
     static uint32_t last_scan = 0;
     if (millis() - last_scan >= SENSOR_INTERVAL) {
@@ -618,6 +643,7 @@ void loop() {
     if (bufR.size() > 300) {
       currentState = RECEIVING_LEFT;
       HC12.write(CMD_STOP);
+      setLED(0, 1, 0);
     }
   }
 }

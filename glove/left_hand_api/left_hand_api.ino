@@ -10,23 +10,24 @@ HardwareSerial HC12(1);
 #define HC12_RX 20
 #define HC12_TX 21
 #define PIN_BUTTON 5
-#define PIN_LED 10
 
-// --- Flex Sensor Pins (Left Hand) — reversed from right ---
-// Finger order: [0]=Thumb, [1]=Index, [2]=Middle(ADS), [3]=Ring, [4]=Pinky
+// --- RGB LED Pins ---
+#define PIN_LED_B 10
+#define PIN_LED_G 9
+#define PIN_LED_R 8
+
+// --- Flex Sensor Pins (Left Hand) ---
 const int FLEX_PIN_L[5] = {0, 1, -1, 3, 4}; // -1 = ADS1115
-const int ADS_CHANNEL_MID = 2;
+const int ADS_CHANNEL_MID = 3;
 const uint8_t SIG_VBAT = 0xEB;
-const int ADS_CH_VBAT = 0; // ใช้ A0 เดียวกัน (ADS_CHANNEL_MID อยู่ที่ A2)
+const int ADS_CH_VBAT = 1;
 const float VBAT_RATIO = 2.0f;
 
 const unsigned long VBAT_INTERVAL = 5000;
-
 unsigned long lastVbatSend = 0;
 
 Adafruit_ADS1115 ads;
 
-// --- Thresholds ---
 const float T_ACCEL = 0.25;
 const float T_GYRO = 20.0;
 int t_flex = 300;
@@ -58,7 +59,6 @@ const uint8_t CMD_DATA = 0xD1;
 const uint8_t CMD_END = 0xD2;
 const uint8_t SIG_CANCEL = 0xEE;
 
-// HC12 Calibration update bytes (Left → Right)
 const uint8_t CAL_OPEN = 0xC1;
 const uint8_t CAL_CLOSE = 0xC2;
 const uint8_t CAL_DONE = 0xC3;
@@ -70,7 +70,26 @@ bool isBtnHeld = false;
 bool actionTriggered = false;
 
 // =====================================================
-// Flash Memory
+// RGB LED Control
+// =====================================================
+void setLED(bool r, bool g, bool b) {
+  digitalWrite(PIN_LED_R, r ? HIGH : LOW);
+  digitalWrite(PIN_LED_G, g ? HIGH : LOW);
+  digitalWrite(PIN_LED_B, b ? HIGH : LOW);
+}
+
+void blinkRGB(bool r, bool g, bool b, int times, int duration) {
+  for (int i = 0; i < times; i++) {
+    setLED(r, g, b);
+    delay(duration);
+    setLED(0, 0, 0);
+    if (i < times - 1)
+      delay(duration);
+  }
+}
+
+// =====================================================
+// Flash Memory & Utils
 // =====================================================
 void saveCalibrationToFlash() {
   preferences.begin("glove-cal", false);
@@ -89,24 +108,8 @@ void loadCalibrationFromFlash() {
     preferences.getBytes("fMin", flexMin, sizeof(flexMin));
     preferences.getBytes("fMax", flexMax, sizeof(flexMax));
     t_flex = preferences.getInt("tFlex", 200);
-    Serial.println(">> Calibration Loaded from Flash!");
-    Serial.printf(">> Flex Threshold: %d\n", t_flex);
   }
   preferences.end();
-}
-
-// =====================================================
-// Utilities
-// =====================================================
-void blinkLED(int times, int duration) {
-  pinMode(PIN_LED, OUTPUT);
-  for (int i = 0; i < times; i++) {
-    digitalWrite(PIN_LED, HIGH);
-    delay(duration);
-    digitalWrite(PIN_LED, LOW);
-    if (i < times - 1)
-      delay(duration);
-  }
 }
 
 void readMPU(GloveData &d) {
@@ -147,7 +150,6 @@ bool checkMovement(GloveData current) {
   return false;
 }
 
-// Read all 5 flex sensors into raw[5]
 void readFlexSensors(int raw[5]) {
   for (int i = 0; i < 5; i++) {
     if (FLEX_PIN_L[i] >= 0) {
@@ -161,34 +163,27 @@ void readFlexSensors(int raw[5]) {
   }
 }
 
-// =====================================================
-// Send calibration update to right hand (→ right → API)
-// =====================================================
 void sendCalUpdate(uint8_t calCmd, uint8_t round) {
-  HC12.write(CMD_CAL_LEFT); // header
-  HC12.write(calCmd);       // CAL_OPEN / CAL_CLOSE / CAL_DONE
-  HC12.write(round);        // round number
+  HC12.write(CMD_CAL_LEFT);
+  HC12.write(calCmd);
+  HC12.write(round);
   delay(10);
 }
 
 // =====================================================
 // Calibrate LEFT hand
-// Triggered by holding left button 3s
-// Sends calibration steps via HC12 to right hand → right hand → API
 // =====================================================
 void calibrateLeft() {
   Serial.println("\n=== CALIBRATION MODE (LEFT HAND) ===");
-  blinkLED(5, 100);
+  blinkRGB(1, 0, 1, 5, 100); // สีม่วง 5 ที
 
   long sumOpen[5] = {0, 0, 0, 0, 0};
   long sumClose[5] = {0, 0, 0, 0, 0};
 
   for (int round = 1; round <= 5; round++) {
-    Serial.printf(">> ROUND %d/5\n", round);
-
-    // --- Open hand ---
     Serial.println("   [ACTION] OPEN hand -> Press Button");
-    sendCalUpdate(CAL_OPEN, round); // notify right hand → API
+    setLED(1, 0, 1);
+    sendCalUpdate(CAL_OPEN, round);
     waitForUserAction();
     {
       int rawF[5];
@@ -196,10 +191,12 @@ void calibrateLeft() {
       for (int i = 0; i < 5; i++)
         sumOpen[i] += rawF[i];
     }
+    setLED(0, 0, 0);
+    delay(100);
 
-    // --- Close hand ---
     Serial.println("   [ACTION] CLOSE hand -> Press Button");
-    sendCalUpdate(CAL_CLOSE, round); // notify right hand → API
+    setLED(1, 0, 1);
+    sendCalUpdate(CAL_CLOSE, round);
     waitForUserAction();
     {
       int rawF[5];
@@ -208,46 +205,39 @@ void calibrateLeft() {
         sumClose[i] += rawF[i];
     }
 
-    blinkLED(2, 100);
+    blinkRGB(1, 0, 1, 2, 100);
   }
 
-  // Calculate results
-  Serial.println("\n=== CALIBRATION RESULTS ===");
   for (int i = 0; i < 5; i++) {
     flexMin[i] = sumOpen[i] / 5;
     flexMax[i] = sumClose[i] / 5;
     if (flexMin[i] == flexMax[i])
       flexMax[i] += 1;
-    Serial.printf("  F%d Min: %d | Max: %d\n", i, flexMin[i], flexMax[i]);
   }
   t_flex = 10;
   isCalibrated = true;
   saveCalibrationToFlash();
 
-  // Notify right hand → API: calibration done
   sendCalUpdate(CAL_DONE, 5);
-  Serial.println(">> LEFT HAND CALIBRATION DONE!");
+  blinkRGB(0, 1, 0, 3, 200); // กระพริบเขียว 3 ทีเสร็จสิ้น
+  setLED(0, 0, 1);           // กลับไปโหมด IDLE สีน้ำเงิน
 
-  blinkLED(3, 200);
   while (digitalRead(PIN_BUTTON) == HIGH)
     delay(10);
   isBtnHeld = false;
   actionTriggered = false;
 }
 
-// =====================================================
-// Send recorded data to right hand (master)
-// =====================================================
 void sendDataToMaster() {
-  Serial.printf("Sending %d frames to master...\n", storage.size());
+  setLED(0, 1, 0); // โชว์สีเขียวค้างตอนส่งข้อมูล
   for (size_t i = 0; i < storage.size(); i++) {
     HC12.write(CMD_DATA);
     HC12.write((uint8_t *)&storage[i], sizeof(GloveData));
     delay(10);
   }
   HC12.write(CMD_END);
-  Serial.println("Send Complete");
   storage.clear();
+  setLED(0, 0, 1); // ส่งเสร็จกลับเป็นสีน้ำเงิน
 }
 
 float readBatteryVoltage() {
@@ -261,64 +251,60 @@ void sendVbatToMaster() {
   float v = readBatteryVoltage();
   if (v < 0)
     return;
-  int16_t mv = (int16_t)(v * 1000.0f); // แปลงเป็น mV เก็บใน 2 bytes
+  int16_t mv = (int16_t)(v * 1000.0f);
   HC12.write(SIG_VBAT);
-  HC12.write((uint8_t)(mv >> 8));   // high byte
-  HC12.write((uint8_t)(mv & 0xFF)); // low byte
-  Serial.printf("[VBAT] Sent left voltage: %.3fV\n", v);
+  HC12.write((uint8_t)(mv >> 8));
+  HC12.write((uint8_t)(mv & 0xFF));
 }
 
-// =====================================================
-// setup()
-// =====================================================
 void setup() {
   Serial.begin(115200);
   HC12.begin(115200, SERIAL_8N1, HC12_RX, HC12_TX);
   analogReadResolution(12);
 
   pinMode(PIN_BUTTON, INPUT);
-  pinMode(PIN_LED, OUTPUT);
+  pinMode(PIN_LED_R, OUTPUT);
+  pinMode(PIN_LED_G, OUTPUT);
+  pinMode(PIN_LED_B, OUTPUT);
+
   Wire.begin(6, 7);
   mpu.setWire(&Wire);
   mpu.beginAccel();
   mpu.beginGyro();
 
-  // ADS1115 init
   if (ads.begin(0x48)) {
     ads.setGain(GAIN_ONE);
     adsReady = true;
-    Serial.println("ADS1115 ready!");
-  } else {
-    Serial.println("WARNING: ADS1115 not found!");
   }
 
-  Serial.println("--- LEFT HAND READY ---");
   loadCalibrationFromFlash();
+  setLED(0, 0, 1); // IDLE สีน้ำเงิน
+  Serial.println("--- LEFT HAND (API) READY ---");
+
+  delay(300); // ป้องกันบั๊กกดปุ่มตอนเปิดเครื่อง
+  while (digitalRead(PIN_BUTTON) == HIGH)
+    delay(10);
+  isBtnHeld = false;
+  actionTriggered = false;
 }
 
-// =====================================================
-// loop()
-// =====================================================
 void loop() {
-  // =========================================
-  // HC12 commands from right hand (master)
-  // =========================================
   if (HC12.available()) {
     uint8_t cmd = HC12.read();
     if (cmd == CMD_START) {
       isRecording = true;
       storage.clear();
       memset(&lastData, 0, sizeof(GloveData));
-      Serial.println("CMD: START → Recording");
+      setLED(1, 0, 0); // RECORDING สีแดง
     } else if (cmd == CMD_STOP) {
       isRecording = false;
-      Serial.println("CMD: STOP → Sending data...");
       sendDataToMaster();
-    } else if (cmd == CMD_ABORT) { // <--- เพิ่มตรงนี้
+    } else if (cmd == CMD_ABORT) {
       isRecording = false;
       storage.clear();
       memset(&lastData, 0, sizeof(GloveData));
-      Serial.println("CMD: ABORT → Clear data and Idle");
+      blinkRGB(1, 1, 0, 3, 150); // กระพริบเหลือง 3 ที (โดนยกเลิก)
+      setLED(0, 0, 1);           // กลับไปสีน้ำเงิน
     }
   }
 
@@ -327,9 +313,6 @@ void loop() {
     sendVbatToMaster();
   }
 
-  // =========================================
-  // Sensor recording (50Hz)
-  // =========================================
   if (isRecording) {
     static uint32_t last_scan = 0;
     if (millis() - last_scan >= 20) {
@@ -356,25 +339,23 @@ void loop() {
     }
     if (storage.size() >= 300) {
       isRecording = false;
-      Serial.println("WARNING: Left Buffer Full (300) -> Auto Stopped");
+      setLED(0, 0, 1);
     }
   }
 
   // =========================================
-  // Left button handling
+  // ระบบปุ่มกดมือซ้าย (แก้ไขบั๊กกดค้างแล้วลั่น)
   // =========================================
+  int reading = digitalRead(PIN_BUTTON);
   static uint32_t lastDebounceTime = 0;
   static int lastReading = LOW;
   static int btnState = LOW;
 
-  int reading = digitalRead(PIN_BUTTON);
-  if (reading != lastReading) {
+  if (reading != lastReading)
     lastDebounceTime = millis();
-  }
   if ((millis() - lastDebounceTime) > 50) {
-    if (reading != btnState) {
+    if (reading != btnState)
       btnState = reading;
-    }
   }
   lastReading = reading;
 
@@ -386,32 +367,28 @@ void loop() {
     } else {
       unsigned long heldTime = millis() - btnPressStart;
 
-      // Long press 3s → calibrate left hand
+      // กดค้าง 3 วิ → calibrate
       if (heldTime > LONG_PRESS_MS && !actionTriggered) {
         if (!isRecording) {
-          actionTriggered = true;
+          actionTriggered = true; // 🌟 ล็อคไว้
           calibrateLeft();
-          isBtnHeld = false;
-          btnPressStart = millis();
-          return;
         }
       }
     }
   } else {
-    // Button released
+    // 🌟 จังหวะยกนิ้วออกจากปุ่ม 🌟
     if (isBtnHeld) {
       if (!actionTriggered && (millis() - btnPressStart > 50)) {
-        // Short press → send cancel/clear signal to right hand
-        HC12.write(SIG_CANCEL);
-        Serial.println("Sent CANCEL/CLEAR to master");
-        // If recording, also clear local data
+        // กดสั้น → ยกเลิกท่าทาง
         if (isRecording) {
           storage.clear();
           memset(&lastData, 0, sizeof(GloveData));
-          Serial.println("Local data cleared — redo gesture");
+          HC12.write(SIG_CANCEL);
+          blinkRGB(1, 1, 0, 3, 100); // กระพริบเหลือง 3 ที
+          setLED(1, 0, 0);           // เปิดสีแดงรอกดอัดต่อ
         }
       }
-      isBtnHeld = false;
+      isBtnHeld = false; // 🌟 รีเซ็ตปุ่มที่นี่ที่เดียว
     }
   }
 }

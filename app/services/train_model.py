@@ -131,6 +131,15 @@ def load_dataset(data_dir, expected_frames):
         print("[!] No valid data loaded")
         return None, None, None
 
+    # Remap labels to contiguous 0..N-1 (fixes XGBoost error when a folder has no valid data)
+    unique_labels = sorted(set(y))
+    if unique_labels != list(range(len(unique_labels))):
+        old_to_new = {old: new for new, old in enumerate(unique_labels)}
+        y = [old_to_new[label] for label in y]
+        labels_map = {new: labels_map[old] for old, new in old_to_new.items()}
+        print(f"\n[!] Remapped {len(unique_labels)} labels to contiguous 0..{len(unique_labels)-1}")
+        print(f"    (Some folders had no valid data)")
+
     return np.array(X, dtype=np.float32), np.array(y, dtype=np.int64), labels_map
 
 
@@ -316,7 +325,152 @@ def train(model_name: str):
     print(cm)
 
     print(f"\n--- Detailed Classification Report ---")
-    print(classification_report(y_test, preds_ensemble, target_names=list(labels_map.values()), zero_division=0))
+    target_names = list(labels_map.values())
+    print(classification_report(y_test, preds_ensemble, target_names=target_names, zero_division=0))
+
+    # --------------------------------------------------
+    # Dataset Analysis & Scaling Recommendations
+    # --------------------------------------------------
+    print(f"\n{'='*70}")
+    print(f"📊 Dataset Analysis & Results Summary")
+    print(f"{'='*70}")
+
+    # Per-class sample count
+    unique_classes, class_counts = np.unique(y, return_counts=True)
+    total_samples = len(y)
+
+    # Per-class accuracy from confusion matrix
+    per_class_acc = {}
+    for i in range(len(target_names)):
+        row_sum = cm[i].sum()
+        if row_sum > 0:
+            per_class_acc[i] = cm[i][i] / row_sum * 100
+        else:
+            per_class_acc[i] = 0.0
+
+    # Count train/test per class
+    unique_train, train_counts = np.unique(y_train, return_counts=True)
+    unique_test, test_counts = np.unique(y_test, return_counts=True)
+    train_map = dict(zip(unique_train, train_counts))
+    test_map = dict(zip(unique_test, test_counts))
+
+    print(f"\n{'Gesture':<20} {'Total':>6} {'Train':>6} {'Test':>6} {'Accuracy':>10} {'Status':>12}")
+    print(f"{'-'*20} {'-'*6} {'-'*6} {'-'*6} {'-'*10} {'-'*12}")
+
+    weak_classes = []
+    for i, name in enumerate(target_names):
+        idx_in_counts = np.where(unique_classes == i)[0]
+        count = int(class_counts[idx_in_counts[0]]) if len(idx_in_counts) > 0 else 0
+        tr = train_map.get(i, 0)
+        te = test_map.get(i, 0)
+        class_acc = per_class_acc.get(i, 0.0)
+
+        if count < 10:
+            status = "⚠️  ข้อมูลน้อย"
+            weak_classes.append((name, count, class_acc))
+        elif count < 30:
+            status = "🔶 พอใช้"
+            if class_acc < 70:
+                weak_classes.append((name, count, class_acc))
+        elif class_acc >= 90:
+            status = "✅ ดีมาก"
+        elif class_acc >= 70:
+            status = "🟢 ดี"
+        else:
+            status = "🔴 ต่ำ"
+            weak_classes.append((name, count, class_acc))
+
+        print(f"  {name:<18} {count:>6} {tr:>6} {te:>6} {class_acc:>8.1f}% {status:>12}")
+
+    # Summary statistics
+    avg_samples = total_samples / num_classes
+    min_samples = int(class_counts.min())
+    max_samples = int(class_counts.max())
+    min_class = target_names[np.argmin(class_counts)]
+    max_class = target_names[np.argmax(class_counts)]
+
+    print(f"\n{'='*70}")
+    print(f"📈 สรุปผลการเทรน — Model '{model_name}'")
+    print(f"{'='*70}")
+    print(f"  จำนวน Gesture ทั้งหมด:     {num_classes} ท่า")
+    print(f"  จำนวน Samples ทั้งหมด:     {total_samples:,} ตัวอย่าง")
+    print(f"  เฉลี่ยต่อ Gesture:          {avg_samples:.1f} ตัวอย่าง/ท่า")
+    print(f"  น้อยสุด:                   {min_samples} ({min_class})")
+    print(f"  มากสุด:                    {max_samples} ({max_class})")
+    print(f"  Train/Test Split:          70% / 30%")
+    print(f"")
+    print(f"  ผลลัพธ์ Ensemble:")
+    print(f"    Accuracy:    {acc*100:.2f}%")
+    print(f"    Precision:   {precision*100:.2f}%")
+    print(f"    Recall:      {recall*100:.2f}%")
+    print(f"    F1-Score:    {f1*100:.2f}%")
+
+    # Weak classes warning
+    if weak_classes:
+        print(f"\n{'='*70}")
+        print(f"⚠️  Gesture ที่ต้องปรับปรุง ({len(weak_classes)} ท่า)")
+        print(f"{'='*70}")
+        for name, count, class_acc in weak_classes:
+            reason = []
+            if count < 10:
+                reason.append(f"ข้อมูลน้อยมาก ({count} samples)")
+            elif count < 30:
+                reason.append(f"ข้อมูลยังน้อย ({count} samples)")
+            if class_acc < 70:
+                reason.append(f"accuracy ต่ำ ({class_acc:.1f}%)")
+            print(f"  • {name}: {', '.join(reason)}")
+
+    # Scaling recommendations
+    print(f"\n{'='*70}")
+    print(f"💡 คำแนะนำ — ถ้ามี Dataset มากขึ้น")
+    print(f"{'='*70}")
+
+    if avg_samples < 15:
+        print(f"""
+  📍 สถานะปัจจุบัน: ข้อมูลน้อยมาก (เฉลี่ย {avg_samples:.0f} samples/ท่า)
+     โมเดลอาจ overfit กับข้อมูลที่มีและยังไม่ generalize ได้ดี
+
+  📊 ถ้าเพิ่มเป็น 30-50 samples/ท่า:
+     → Accuracy คาดว่าจะเพิ่มขึ้น 10-20%
+     → โมเดลจะเรียนรู้ pattern ของท่ามือได้หลากหลายขึ้น
+     → ลด overfitting ได้มาก
+
+  📊 ถ้าเพิ่มเป็น 80-100 samples/ท่า:
+     → Accuracy คาดว่าจะอยู่ที่ 85-95%+
+     → โมเดลจะ robust ต่อความแตกต่างระหว่างผู้ใช้
+     → Ensemble (CNN-LSTM + XGBoost) จะทำงานได้เต็มประสิทธิภาพ
+
+  📊 ถ้าเพิ่มเป็น 150+ samples/ท่า:
+     → Accuracy คาดว่าจะ 95%+ อย่างมั่นคง
+     → รองรับผู้ใช้หลายคน (cross-user generalization)
+     → สามารถเพิ่มท่ามือใหม่ได้ง่ายโดยไม่กระทบท่าเดิม""")
+    elif avg_samples < 50:
+        print(f"""
+  📍 สถานะปัจจุบัน: ข้อมูลปานกลาง (เฉลี่ย {avg_samples:.0f} samples/ท่า)
+     โมเดลเริ่มเรียนรู้ pattern ได้แต่ยังไม่ robust พอ
+
+  📊 ถ้าเพิ่มเป็น 80-100 samples/ท่า:
+     → Accuracy คาดว่าจะเพิ่มขึ้น 5-15%
+     → Weak classes จะดีขึ้นอย่างเห็นได้ชัด
+     → ใช้งานจริงได้มั่นใจมากขึ้น
+
+  📊 ถ้าเพิ่มเป็น 150+ samples/ท่า:
+     → Accuracy คาดว่าจะ 95%+ อย่างมั่นคง
+     → รองรับผู้ใช้หลายคน (cross-user generalization)""")
+    else:
+        print(f"""
+  📍 สถานะปัจจุบัน: ข้อมูลดี (เฉลี่ย {avg_samples:.0f} samples/ท่า)
+
+  📊 ถ้าต้องการเพิ่มประสิทธิภาพ:
+     → เก็บข้อมูลจากผู้ใช้หลายคน (หลายขนาดมือ/ท่วงท่า)
+     → เพิ่ม data augmentation (noise, time-shift)
+     → ปรับ hyperparameters (learning rate, epochs, layers)""")
+
+    # Highlight imbalanced classes
+    if max_samples > min_samples * 3:
+        print(f"\n  ⚠️  ข้อมูลไม่สมดุล! (max {max_samples} vs min {min_samples})")
+        print(f"     ควรเพิ่มข้อมูลให้ท่าที่น้อยเป็นอย่างน้อย {max_samples // 2} samples")
+        print(f"     หรือใช้ data augmentation / oversampling ช่วย")
 
     print(f"\n✅ Training complete! Local models saved to {OUTPUT_DIR}/")
 
