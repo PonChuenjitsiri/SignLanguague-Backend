@@ -392,6 +392,8 @@ async def _send_ws_state(websocket: WebSocket, device_id: str, timeout: int):
     hand = cal_state.get("hand", "right") if cal_state else "right"
     cal_round = str(cal_state.get("round", 0)) if cal_state else "0"
     cal_step = cal_state.get("step", "idle") if cal_state else "idle"
+    # calibrate_state: "open" | "close" | "idle"
+    cal_hand_state = cal_step if cal_step in ("open", "close") else "idle"
     if cal_step == "done":
         cal_round = "done"
 
@@ -414,6 +416,7 @@ async def _send_ws_state(websocket: WebSocket, device_id: str, timeout: int):
         "recording": ws_sentence["recording"],
         "complete": ws_sentence["complete"],
         "word_count": ws_sentence["word_count"],
+        "calibrate_state": cal_hand_state,
         "calibrate_left": cal_hands.get("left", False),
         "calibrate_right": cal_hands.get("right", False),
         "right_voltage": batt_info.get("right_voltage", 0.0),
