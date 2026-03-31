@@ -113,20 +113,37 @@ async def heartbeat(request: HeartbeatRequest = HeartbeatRequest()):
     is considered offline.
     """
     now = datetime.now(timezone.utc)
+    settings = get_settings()
+
+    # Check if status is changing (offline/unknown → online)
+    prev_hb = _heartbeats.get(request.device_id)
+    was_online = False
+    if prev_hb is not None:
+        elapsed = (now - prev_hb).total_seconds()
+        was_online = elapsed <= settings.GLOVE_HEARTBEAT_TIMEOUT
+
     _heartbeats[request.device_id] = now
     
     def calc_battery(v: float) -> float:
         if v < 0: return 0.0
         return max(0.0, min(100.0, (v - 3.3) / (4.2 - 3.3) * 100.0))
-        
-    _battery_info[request.device_id] = {
+
+    new_battery = {
         "right_voltage": request.right_voltage,
         "left_voltage": request.left_voltage,
         "right_battery": calc_battery(request.right_voltage),
         "left_battery": calc_battery(request.left_voltage)
     }
-    
-    await sentence_buffer.notify(request.device_id)  # trigger WS update for this device only
+
+    old_battery = _battery_info.get(request.device_id, {})
+    _battery_info[request.device_id] = new_battery
+
+    # Only notify WebSocket if status actually changed
+    status_changed = not was_online  # offline/unknown → online
+    battery_changed = old_battery != new_battery
+
+    if status_changed or battery_changed:
+        await sentence_buffer.notify(request.device_id)
 
     return HeartbeatResponse(
         status="ok",
